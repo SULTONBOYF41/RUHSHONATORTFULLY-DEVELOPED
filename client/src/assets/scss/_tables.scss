@@ -1,0 +1,38 @@
+@use "variables" as *;
+
+.table {
+    width: 100%;
+    border-collapse: collapse;
+    font-size: 13px;
+
+    th,
+    td {
+        padding: 8px 10px;
+        text-align: left;
+        border-bottom: 1px solid $rt-border-subtle;
+    }
+
+    thead {
+        background: $rt-table-header-bg;
+
+        th {
+            font-weight: 500;
+            font-size: 12px;
+            text-transform: uppercase;
+            letter-spacing: 0.03em;
+            color: $rt-text-muted;
+        }
+    }
+
+    tbody tr {
+        background: $rt-table-row-bg;
+    }
+
+    tbody tr:nth-child(even) {
+        background: $rt-table-row-alt-bg;
+    }
+
+    tbody tr:hover {
+        background: rgba(59, 130, 246, 0.06);
+    }
+}

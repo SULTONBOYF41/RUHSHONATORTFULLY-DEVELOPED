@@ -1,0 +1,354 @@
+@use "variables" as *;
+
+/* Umumiy fon va konteyner */
+.app-container {
+    min-height: 100vh;
+    padding: 20px 14px 24px;
+    background: $rt-body-bg;
+    color: $rt-text-color;
+}
+
+.app-shell {
+    width: 100%;
+    max-width: $rt-content-max-width;
+    margin: 0 auto;
+    display: flex;
+    align-items: stretch;
+    gap: 18px;
+}
+
+/* CHAP SIDEBAR */
+.app-sidebar {
+    width: 230px;
+    background: $rt-nav-bg;
+    border-radius: $rt-radius-lg;
+    padding: 14px 12px 12px;
+    box-shadow: $rt-shadow-soft;
+    display: flex;
+    flex-direction: column;
+    gap: 16px;
+    height: calc(100vh - 48px);
+    position: sticky;
+    top: 20px;
+}
+
+.app-sidebar--collapsed {
+    width: 72px;
+    align-items: center;
+    padding-inline: 10px;
+}
+
+/* Logo + brand */
+.app-sidebar-header {
+    display: flex;
+    align-items: center;
+    gap: 10px;
+}
+
+.app-logo {
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    width: 34px;
+    height: 34px;
+    border-radius: 50%;
+    background: linear-gradient(135deg, $rt-primary, #7c4bff);
+    color: #fff;
+    font-size: 18px;
+    font-weight: 700;
+}
+
+.app-brand {
+    display: flex;
+    flex-direction: column;
+
+    &-title {
+        font-size: 15px;
+        font-weight: 600;
+        color: $rt-text-color; // LIGHT va DARK uchun ham mos bo‘ladi
+    }
+
+    &-subtitle {
+        font-size: 11px;
+        color: $rt-text-muted;
+    }
+}
+
+/* Vertical nav */
+.app-nav-vertical {
+    display: flex;
+    flex-direction: column;
+    gap: 4px;
+    margin-top: 8px;
+
+    a {
+        display: flex;
+        align-items: center;
+        gap: 8px;
+        font-size: 13px;
+        padding: 8px 10px;
+        border-radius: $rt-radius-md;
+        color: $rt-text-muted; // LIGHT’da ham ko‘rinadi
+        border: 1px solid transparent;
+        text-decoration: none;
+        transition: all 0.15s ease;
+
+        .app-nav-icon {
+            font-size: 16px;
+            width: 18px;
+            text-align: center;
+        }
+
+        .app-nav-label {
+            white-space: nowrap;
+        }
+
+        &.active {
+            background: $rt-primary-soft;
+            color: $rt-primary; // DARK va LIGHT ikkalasida ham yaxshi ko‘rinadi
+            border-color: $rt-primary;
+            font-weight: 500;
+        }
+
+        &:hover {
+            background: rgba(148, 163, 184, 0.14);
+            color: $rt-text-color;
+        }
+    }
+}
+
+/* collapse holati */
+.app-sidebar--collapsed {
+    .app-brand {
+        display: none;
+    }
+
+    .app-nav-vertical a {
+        justify-content: center;
+
+        .app-nav-label {
+            display: none;
+        }
+    }
+}
+
+/* Sidebar pastidagi tugma */
+.app-sidebar-toggle {
+    margin-top: auto;
+    align-self: flex-end;
+    border: none;
+    border-radius: 999px;
+    padding: 4px 8px;
+    font-size: 14px;
+    background: rgba(15, 23, 42, 0.7);
+    color: #e5e7eb;
+    cursor: pointer;
+    transition: background 0.15s ease, transform 0.1s ease;
+
+    &:hover {
+        background: rgba(15, 23, 42, 0.95);
+        transform: translateX(1px);
+    }
+}
+
+.app-sidebar--collapsed .app-sidebar-toggle {
+    align-self: center;
+}
+
+/* O‘NG TOMON – main qismi */
+.app-main {
+    flex: 1;
+    display: flex;
+    flex-direction: column;
+    gap: 12px;
+}
+
+/* Tepadagi panel (profil + theme) */
+.app-topbar {
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+    background: $rt-nav-bg;
+    border-radius: $rt-radius-lg;
+    padding: 8px 14px;
+    box-shadow: $rt-shadow-soft;
+}
+
+.app-topbar-left {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+}
+
+.app-topbar-right {
+    display: flex;
+    align-items: center;
+    gap: 10px;
+}
+
+/* Theme toggle tugmasi */
+.app-theme-toggle {
+    border: none;
+    border-radius: 999px;
+    padding: 4px 10px;
+    font-size: 12px;
+    background: transparent;
+    color: $rt-text-muted;
+    cursor: pointer;
+    display: inline-flex;
+    align-items: center;
+    gap: 4px;
+    transition: background 0.15s ease, color 0.15s ease;
+
+    span {
+        font-size: 11px;
+    }
+
+    &:hover {
+        background: rgba(148, 163, 184, 0.16);
+        color: $rt-text-color;
+    }
+}
+
+/* Foydalanuvchi info + avatar */
+.app-user {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+
+    &-avatar {
+        width: 30px;
+        height: 30px;
+        border-radius: 999px;
+        background: linear-gradient(135deg, $rt-primary, #7c4bff);
+        display: flex;
+        align-items: center;
+        justify-content: center;
+        font-size: 14px;
+        font-weight: 600;
+        color: #fff;
+    }
+
+    &-text {
+        display: flex;
+        flex-direction: column;
+        align-items: flex-end;
+    }
+
+    &-name {
+        font-size: 13px;
+        color: $rt-text-color; // avval oq edi, light’da yo‘qolib qolardi
+    }
+
+    &-role {
+        font-size: 11px;
+        color: $rt-text-muted;
+    }
+}
+
+/* Kontent */
+.app-content {
+    flex: 1;
+}
+
+/* Sahifa layoutlari */
+.page {
+    display: flex;
+    flex-direction: column;
+    gap: 18px;
+}
+
+.page-header {
+    display: flex;
+    align-items: flex-start;
+    justify-content: space-between;
+    gap: 14px;
+    margin-bottom: 2px;
+}
+
+.page-title {
+    font-size: 20px;
+    font-weight: 600;
+    margin-bottom: 4px;
+}
+
+.page-subtitle {
+    font-size: 13px;
+    color: $rt-text-muted;
+}
+
+.page-section {
+    margin-top: 6px;
+}
+
+.page-section-header {
+    display: flex;
+    align-items: baseline;
+    justify-content: space-between;
+    margin-bottom: 8px;
+}
+
+.page-section-title {
+    font-size: 16px;
+    font-weight: 600;
+}
+
+.page-section-subtitle {
+    font-size: 12px;
+    color: $rt-text-muted;
+}
+
+.page-header-actions {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+}
+
+.table-wrapper {
+    width: 100%;
+    overflow-x: auto;
+}
+
+/* Responsiv */
+@media (max-width: 900px) {
+    .app-shell {
+        flex-direction: column;
+    }
+
+    .app-sidebar {
+        position: static;
+        height: auto;
+        flex-direction: row;
+        align-items: center;
+        padding: 10px;
+    }
+
+    .app-sidebar--collapsed {
+        width: 100%;
+    }
+
+    .app-nav-vertical {
+        flex-direction: row;
+        flex-wrap: wrap;
+        margin-top: 0;
+    }
+
+    .app-topbar {
+        justify-content: space-between;
+    }
+
+    .page-header {
+        flex-direction: column;
+        align-items: flex-start;
+    }
+
+    .page-header-actions {
+        width: 100%;
+        flex-wrap: wrap;
+
+        .input {
+            flex: 1;
+            min-width: 160px;
+        }
+    }
+}

@@ -1,0 +1,71 @@
+/* CSS custom property lar – theme boshqarish uchun */
+
+:root {
+    --rt-primary: #3b82f6;
+    --rt-primary-soft: rgba(59, 130, 246, 0.16);
+    --rt-danger: #ef4444;
+
+    --rt-radius-md: 8px;
+    --rt-radius-lg: 18px;
+    --rt-shadow-soft: 0 18px 40px rgba(15, 23, 42, 0.45);
+    --rt-content-max-width: 1280px;
+}
+
+/* DARK THEME */
+:root[data-theme="dark"] {
+    --rt-body-bg: radial-gradient(circle at top, #1e293b 0, #020617 55%, #000 100%);
+    --rt-surface: #020617;
+    --rt-surface-elevated: #020617;
+    --rt-nav-bg: #020617;
+    --rt-border-subtle: rgba(148, 163, 184, 0.22);
+    --rt-text-color: #e5e7eb;
+    --rt-text-muted: #9ca3af;
+
+    --rt-table-header-bg: rgba(15, 23, 42, 0.9);
+    --rt-table-row-bg: rgba(15, 23, 42, 0.6);
+    --rt-table-row-alt-bg: rgba(15, 23, 42, 0.3);
+
+    --rt-input-bg: rgba(15, 23, 42, 0.95);
+}
+
+/* LIGHT THEME */
+:root[data-theme="light"] {
+    --rt-body-bg: #f3f4f6;
+    --rt-surface: #ffffff;
+    --rt-surface-elevated: #ffffff;
+    --rt-nav-bg: #ffffff;
+    --rt-border-subtle: rgba(148, 163, 184, 0.45);
+    --rt-text-color: #0f172a;
+    --rt-text-muted: #6b7280;
+
+    --rt-table-header-bg: #e5e7eb;
+    --rt-table-row-bg: #ffffff;
+    --rt-table-row-alt-bg: #f9fafb;
+
+    --rt-input-bg: #ffffff;
+}
+
+/* SCSS tokenlar – hamma joyda shularni ishlatyapmiz */
+
+$rt-primary: var(--rt-primary);
+$rt-primary-soft: var(--rt-primary-soft);
+$rt-danger: var(--rt-danger);
+
+$rt-radius-md: var(--rt-radius-md);
+$rt-radius-lg: var(--rt-radius-lg);
+$rt-shadow-soft: var(--rt-shadow-soft);
+$rt-content-max-width: var(--rt-content-max-width);
+
+$rt-body-bg: var(--rt-body-bg);
+$rt-surface: var(--rt-surface);
+$rt-surface-elevated: var(--rt-surface-elevated);
+$rt-nav-bg: var(--rt-nav-bg);
+$rt-border-subtle: var(--rt-border-subtle);
+$rt-text-color: var(--rt-text-color);
+$rt-text-muted: var(--rt-text-muted);
+
+$rt-table-header-bg: var(--rt-table-header-bg);
+$rt-table-row-bg: var(--rt-table-row-bg);
+$rt-table-row-alt-bg: var(--rt-table-row-alt-bg);
+
+$rt-input-bg: var(--rt-input-bg);

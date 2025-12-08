@@ -1,0 +1,44 @@
+@use "variables" as *;
+
+.input,
+input,
+select,
+textarea {
+    width: 100%;
+    padding: 9px 11px;
+    border-radius: $rt-radius-md;
+    border: 1px solid $rt-border-subtle;
+    background: $rt-input-bg;
+    color: $rt-text-color;
+    font-size: 13px;
+    outline: none;
+    transition: border-color 0.15s ease, box-shadow 0.15s ease,
+        background 0.15s ease;
+
+    &::placeholder {
+        color: $rt-text-muted;
+    }
+
+    &:focus {
+        border-color: $rt-primary;
+        box-shadow: 0 0 0 1px rgba(59, 130, 246, 0.4);
+    }
+}
+
+label {
+    display: block;
+    font-size: 12px;
+    margin-bottom: 4px;
+    color: $rt-text-muted;
+}
+
+.form-row {
+    display: grid;
+    grid-template-columns: repeat(3, minmax(0, 1fr));
+    gap: 10px;
+    margin-bottom: 14px;
+
+    @media (max-width: 900px) {
+        grid-template-columns: 1fr;
+    }
+}
