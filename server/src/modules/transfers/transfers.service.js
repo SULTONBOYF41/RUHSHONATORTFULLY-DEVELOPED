@@ -11,7 +11,7 @@ function validateCreateInput(data = {}) {
 
     const toBranch = Number(to_branch_id);
     if (!toBranch) {
-        throw new Error("Filialni tanlash majburiy");
+        throw new Error("Filialni / do‘konni tanlash majburiy");
     }
 
     if (!Array.isArray(items) || items.length === 0) {
@@ -27,7 +27,7 @@ function validateCreateInput(data = {}) {
 
     if (cleanedItems.length === 0) {
         throw new Error(
-            "Kamida bitta to'g'ri satr kerak (product_id va quantity > 0)"
+            "Kamida bitta to‘g‘ri satr kerak (product_id va quantity > 0)"
         );
     }
 
@@ -42,13 +42,9 @@ function validateCreateInput(data = {}) {
 
 /**
  * Yangi transfer yaratish
- *  - user bu yerga controller'dan keladi (req.user)
- *  - created_by ni user.id bilan to‘ldirib yuboramiz (agar bo‘lsa)
- *  - BU YERDA endi "Faqat admin" tekshiruvi YO‘Q – agar kerak bo‘lsa routes’da requireRole('admin') bilan qilamiz
+ *  - created_by ni user.id bilan to‘ldiramiz
  */
 async function createTransfer(data, user) {
-    // created_by ni user.id dan ustun qo'yamiz,
-    // frontdan kelgan created_by bo'lsa ham overwrite qilamiz:
     const payload = {
         ...data,
         created_by: user?.id || data?.created_by || null,
@@ -90,6 +86,29 @@ async function rejectItem(transferId, itemId, branchId) {
     });
 }
 
+/**
+ * Transferni tahrirlash (faqat PENDING / barcha bandlari PENDING)
+ */
+async function updateTransfer(id, data, user) {
+    const payload = {
+        ...data,
+        created_by: user?.id || data?.created_by || null,
+    };
+
+    const valid = validateCreateInput(payload);
+    return repo.updateTransfer({
+        id: Number(id),
+        ...valid,
+    });
+}
+
+/**
+ * Transferni bekor qilish / "o‘chirish"
+ */
+async function cancelTransfer(id) {
+    await repo.cancelTransfer(Number(id));
+}
+
 module.exports = {
     createTransfer,
     getAllTransfers,
@@ -97,4 +116,6 @@ module.exports = {
     getIncomingForBranch,
     acceptItem,
     rejectItem,
+    updateTransfer,
+    cancelTransfer,
 };

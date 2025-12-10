@@ -5,7 +5,6 @@ const { run, get, all } = require("../../db/connection");
 /**
  * Bitta transferni id bo'yicha, itemlari bilan qaytarish
  */
-
 async function findById(id) {
     const transfer = await get(
         `
@@ -21,7 +20,7 @@ async function findById(id) {
       t.updated_at,
       bfrom.name AS from_branch_name,
       bto.name   AS to_branch_name,
-      IFNULL(bto.type, 'BRANCH') AS to_branch_type
+      IFNULL(bto.branch_type, 'BRANCH') AS to_branch_type
     FROM transfers t
     LEFT JOIN branches bfrom ON bfrom.id = t.from_branch_id
     LEFT JOIN branches bto   ON bto.id = t.to_branch_id
@@ -53,10 +52,6 @@ async function findById(id) {
     return { ...transfer, items };
 }
 
-
-/**
- * Barcha transferlar (admin uchun)
- */
 /**
  * Barcha transferlar (admin uchun)
  */
@@ -75,7 +70,7 @@ async function findAll() {
       t.updated_at,
       bfrom.name AS from_branch_name,
       bto.name   AS to_branch_name,
-      IFNULL(bto.type, 'BRANCH') AS to_branch_type
+      IFNULL(bto.branch_type, 'BRANCH') AS to_branch_type
     FROM transfers t
     LEFT JOIN branches bfrom ON bfrom.id = t.from_branch_id
     LEFT JOIN branches bto   ON bto.id = t.to_branch_id
@@ -107,7 +102,6 @@ async function findAll() {
 
     return result;
 }
-
 
 /**
  * Yangi transfer yaratish:
@@ -171,6 +165,52 @@ async function createTransfer({ transfer_date, to_branch_id, note, created_by, i
 }
 
 /**
+ * Transfer item statuslarini hisoblab, transfers.status ni yangilash
+ */
+async function recalcTransferStatus(transferId) {
+    const row = await get(
+        `
+    SELECT
+      COUNT(*) AS total,
+      SUM(CASE WHEN status = 'ACCEPTED' THEN 1 ELSE 0 END) AS accepted,
+      SUM(CASE WHEN status = 'REJECTED' THEN 1 ELSE 0 END) AS rejected,
+      SUM(CASE WHEN status = 'PENDING' THEN 1 ELSE 0 END) AS pending
+    FROM transfer_items
+    WHERE transfer_id = ?
+    `,
+        [transferId]
+    );
+
+    const total = row.total || 0;
+    const accepted = row.accepted || 0;
+    const rejected = row.rejected || 0;
+    const pending = row.pending || 0;
+
+    let newStatus = "PENDING";
+
+    if (pending > 0 && (accepted > 0 || rejected > 0)) {
+        newStatus = "PARTIAL";
+    } else if (pending > 0 && accepted === 0 && rejected === 0) {
+        newStatus = "PENDING";
+    } else if (pending === 0 && rejected === 0 && accepted > 0) {
+        newStatus = "COMPLETED";
+    } else if (pending === 0 && accepted === 0 && rejected > 0) {
+        newStatus = "CANCELLED";
+    } else if (pending === 0 && accepted > 0 && rejected > 0) {
+        newStatus = "PARTIAL";
+    }
+
+    await run(
+        `
+    UPDATE transfers
+    SET status = ?, updated_at = datetime('now')
+    WHERE id = ?
+    `,
+        [newStatus, transferId]
+    );
+}
+
+/**
  * Berilgan filial uchun kiruvchi transferlar (PENDING yoki PARTIAL)
  */
 async function findIncomingForBranch(branchId) {
@@ -221,52 +261,6 @@ async function findIncomingForBranch(branchId) {
     }
 
     return result;
-}
-
-/**
- * Transfer item statuslarini hisoblab, transfers.status ni yangilash
- */
-async function recalcTransferStatus(transferId) {
-    const row = await get(
-        `
-    SELECT
-      COUNT(*) AS total,
-      SUM(CASE WHEN status = 'ACCEPTED' THEN 1 ELSE 0 END) AS accepted,
-      SUM(CASE WHEN status = 'REJECTED' THEN 1 ELSE 0 END) AS rejected,
-      SUM(CASE WHEN status = 'PENDING' THEN 1 ELSE 0 END) AS pending
-    FROM transfer_items
-    WHERE transfer_id = ?
-    `,
-        [transferId]
-    );
-
-    const total = row.total || 0;
-    const accepted = row.accepted || 0;
-    const rejected = row.rejected || 0;
-    const pending = row.pending || 0;
-
-    let newStatus = "PENDING";
-
-    if (pending > 0 && (accepted > 0 || rejected > 0)) {
-        newStatus = "PARTIAL";
-    } else if (pending > 0 && accepted === 0 && rejected === 0) {
-        newStatus = "PENDING";
-    } else if (pending === 0 && rejected === 0 && accepted > 0) {
-        newStatus = "COMPLETED";
-    } else if (pending === 0 && accepted === 0 && rejected > 0) {
-        newStatus = "CANCELLED";
-    } else if (pending === 0 && accepted > 0 && rejected > 0) {
-        newStatus = "PARTIAL";
-    }
-
-    await run(
-        `
-    UPDATE transfers
-    SET status = ?, updated_at = datetime('now')
-    WHERE id = ?
-    `,
-        [newStatus, transferId]
-    );
 }
 
 /**
@@ -390,13 +384,155 @@ async function rejectItem({ transferId, itemId, branchId }) {
       SET status = 'REJECTED'
       WHERE id = ?
       `,
-            [itemId]
+            [item.id]
         );
 
         await recalcTransferStatus(transferId);
         await run("COMMIT");
 
         return findById(transferId);
+    } catch (err) {
+        await run("ROLLBACK");
+        throw err;
+    }
+}
+
+/**
+ * Transferni tahrirlash (faqat barcha itemlari PENDING bo'lsa)
+ *  - eski OUT harakatlarini IN bilan kompensatsiya qiladi
+ *  - eski itemlarni o'chiradi
+ *  - headerni yangilaydi
+ *  - yangi itemlar + OUT yaratadi
+ */
+async function updateTransfer({ id, transfer_date, to_branch_id, note, items }) {
+    await run("BEGIN TRANSACTION");
+    try {
+        const existing = await findById(id);
+        if (!existing) throw new Error("Transfer topilmadi");
+
+        const hasProcessed = (existing.items || []).some(
+            (it) => it.status !== "PENDING"
+        );
+        if (hasProcessed) {
+            throw new Error(
+                "Faqat barcha bandlari PENDING bo‘lgan transferni tahrirlash mumkin."
+            );
+        }
+
+        // Eski OUT larni IN bilan kompensatsiya qilamiz
+        for (const it of existing.items || []) {
+            await run(
+                `
+        INSERT INTO warehouse_movements
+          (product_id, branch_id, movement_type, source_type, source_id, quantity, created_at)
+        VALUES
+          (?, NULL, 'IN', 'transfer_edit', ?, ?, datetime('now'))
+        `,
+                [it.product_id, existing.id, it.quantity]
+            );
+        }
+
+        // Eski itemlarni o'chiramiz
+        await run(`DELETE FROM transfer_items WHERE transfer_id = ?`, [existing.id]);
+
+        // Headerni yangilaymiz
+        await run(
+            `
+      UPDATE transfers
+      SET transfer_date = ?, to_branch_id = ?, note = ?, updated_at = datetime('now')
+      WHERE id = ?
+      `,
+            [transfer_date, to_branch_id, note || null, existing.id]
+        );
+
+        // Yangi itemlar + OUT (xuddi createTransfer'dagi kabi)
+        for (const item of items || []) {
+            const productId = Number(item.product_id);
+            const qty = Number(item.quantity);
+            if (!productId || !qty || qty <= 0) continue;
+
+            await run(
+                `
+        INSERT INTO transfer_items (transfer_id, product_id, quantity, status)
+        VALUES (?, ?, ?, 'PENDING')
+        `,
+                [existing.id, productId, qty]
+            );
+
+            await run(
+                `
+        INSERT INTO warehouse_movements
+          (product_id, branch_id, movement_type, source_type, source_id, quantity, created_at)
+        VALUES
+          (?, NULL, 'OUT', 'transfer', ?, ?, datetime('now'))
+        `,
+                [productId, existing.id, qty]
+            );
+        }
+
+        await run("COMMIT");
+        return findById(existing.id);
+    } catch (err) {
+        await run("ROLLBACK");
+        throw err;
+    }
+}
+
+/**
+ * Transferni bekor qilish / "o'chirish"
+ *  - faqat barcha itemlari PENDING bo'lsa
+ *  - barcha itemlarni REJECTED qiladi
+ *  - markaziy omborga IN (OUT'ni qaytarish)
+ *  - transfers.status = CANCELLED
+ */
+async function cancelTransfer(id) {
+    await run("BEGIN TRANSACTION");
+    try {
+        const existing = await findById(id);
+        if (!existing) throw new Error("Transfer topilmadi");
+
+        const hasProcessed = (existing.items || []).some(
+            (it) => it.status !== "PENDING"
+        );
+        if (hasProcessed) {
+            throw new Error(
+                "Faqat barcha bandlari PENDING bo‘lgan transferni bekor qilish mumkin."
+            );
+        }
+
+        for (const it of existing.items || []) {
+            // OUT ni qaytarish – markaziy omborga IN
+            await run(
+                `
+        INSERT INTO warehouse_movements
+          (product_id, branch_id, movement_type, source_type, source_id, quantity, created_at)
+        VALUES
+          (?, NULL, 'IN', 'transfer_cancel', ?, ?, datetime('now'))
+        `,
+                [it.product_id, existing.id, it.quantity]
+            );
+
+            // Item status = REJECTED
+            await run(
+                `
+        UPDATE transfer_items
+        SET status = 'REJECTED'
+        WHERE id = ?
+        `,
+                [it.id]
+            );
+        }
+
+        await run(
+            `
+      UPDATE transfers
+      SET status = 'CANCELLED', updated_at = datetime('now')
+      WHERE id = ?
+      `,
+            [existing.id]
+        );
+
+        await run("COMMIT");
     } catch (err) {
         await run("ROLLBACK");
         throw err;
@@ -410,4 +546,6 @@ module.exports = {
     createTransfer,
     acceptItem,
     rejectItem,
+    updateTransfer,
+    cancelTransfer,
 };

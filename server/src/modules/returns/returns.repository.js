@@ -1,3 +1,4 @@
+// server/src/modules/returns/returns.repository.js
 const { run, get, all } = require('../../db/connection');
 
 /**
@@ -42,7 +43,7 @@ async function createReturn({ branchId, date, comment, items, userId }) {
                 ]
             );
 
-            // Filial omboridan OUT (rezerv)
+            // Filial (yoki do'kon) omboridan OUT (rezerv)
             await run(
                 `
           INSERT INTO warehouse_movements (product_id, branch_id, movement_type, source_type, source_id, quantity)
@@ -60,6 +61,7 @@ async function createReturn({ branchId, date, comment, items, userId }) {
           r.id,
           r.branch_id,
           b.name AS branch_name,
+          b.branch_type,
           r.return_date,
           r.status,
           r.comment,
@@ -116,6 +118,7 @@ async function listReturns({ branchId, status, dateFrom, dateTo, limit, offset }
         r.return_date,
         r.branch_id,
         b.name AS branch_name,
+        b.branch_type,
         r.status,
         r.comment,
         IFNULL(SUM(ri.quantity), 0) AS total_quantity,
@@ -124,7 +127,14 @@ async function listReturns({ branchId, status, dateFrom, dateTo, limit, offset }
       JOIN return_items ri ON ri.return_id = r.id
       LEFT JOIN branches b ON b.id = r.branch_id
       ${where}
-      GROUP BY r.id, r.return_date, r.branch_id, b.name, r.status, r.comment
+      GROUP BY
+        r.id,
+        r.return_date,
+        r.branch_id,
+        b.name,
+        b.branch_type,
+        r.status,
+        r.comment
       ORDER BY r.return_date DESC, r.id DESC
       LIMIT ? OFFSET ?
     `,
@@ -145,6 +155,7 @@ async function getReturnById(id) {
         r.return_date,
         r.branch_id,
         b.name AS branch_name,
+        b.branch_type,
         r.status,
         r.comment,
         r.created_at
@@ -422,7 +433,7 @@ async function cancelReturnItem(returnId, itemId, adminId) {
 
         const qty = Number(item.quantity);
 
-        // Filial omboriga IN (rezervni qaytarish)
+        // Filial / do'kon omboriga IN (rezervni qaytarish)
         await run(
             `
         INSERT INTO warehouse_movements (product_id, branch_id, movement_type, source_type, source_id, quantity)
@@ -447,13 +458,172 @@ async function cancelReturnItem(returnId, itemId, adminId) {
         await run('ROLLBACK');
         throw err;
     }
+};
+
+/* ... HOZIRGI createReturn, listReturns, getReturnById, recalcReturnStatus,
+      approveReturnAllPending, approveReturnItem, cancelReturnItem
+   o'zgarishsiz qoladi
+*/
+
+/**
+ * Qaytishni tahrirlash (faqat PENDING bo'lganda)
+ *  - eski return_items o'chiriladi
+ *  - eski warehouse_movements (source_type='RETURN') o'chiriladi
+ *  - yangilari qayta yoziladi
+ */
+async function updateReturn(returnId, { branchId, date, comment, items, userId }) {
+  const returnDate = date || new Date().toISOString().slice(0, 10);
+
+  await run('BEGIN TRANSACTION');
+
+  try {
+    const header = await get(
+      `SELECT id, status FROM returns WHERE id = ?`,
+      [returnId]
+    );
+
+    if (!header) {
+      throw new Error('Qaytish topilmadi.');
+    }
+
+    if (header.status !== 'PENDING') {
+      throw new Error('Faqat kutilayotgan vazvratni tahrirlash mumkin.');
+    }
+
+    // Headerni yangilaymiz
+    await run(
+      `
+        UPDATE returns
+        SET branch_id = ?, return_date = ?, comment = ?
+        WHERE id = ?
+      `,
+      [branchId, returnDate, comment || null, returnId]
+    );
+
+    // Eski itemlar va ombor harakatlarini o'chiramiz
+    await run(
+      `DELETE FROM return_items WHERE return_id = ?`,
+      [returnId]
+    );
+
+    await run(
+      `DELETE FROM warehouse_movements
+       WHERE source_type = 'RETURN' AND source_id = ?`,
+      [returnId]
+    );
+
+    // Yangi itemlar va OUT (rezerv) harakatlari
+    for (const item of items) {
+      const qty = Number(item.quantity);
+
+      await run(
+        `
+          INSERT INTO return_items (return_id, product_id, quantity, unit, reason, status)
+          VALUES (?, ?, ?, ?, ?, 'PENDING')
+        `,
+        [
+          returnId,
+          item.product_id,
+          qty,
+          item.unit || null,
+          item.reason || null,
+        ]
+      );
+
+      await run(
+        `
+          INSERT INTO warehouse_movements (product_id, branch_id, movement_type, source_type, source_id, quantity)
+          VALUES (?, ?, 'OUT', 'RETURN', ?, ?)
+        `,
+        [item.product_id, branchId, returnId, qty]
+      );
+    }
+
+    await run('COMMIT');
+
+    const updatedHeader = await get(
+      `
+        SELECT
+          r.id,
+          r.branch_id,
+          b.name AS branch_name,
+          b.branch_type,
+          r.return_date,
+          r.status,
+          r.comment,
+          r.created_at
+        FROM returns r
+        LEFT JOIN branches b ON b.id = r.branch_id
+        WHERE r.id = ?
+      `,
+      [returnId]
+    );
+
+    return updatedHeader;
+  } catch (err) {
+    await run('ROLLBACK');
+    throw err;
+  }
+}
+
+/**
+ * Qaytishni o‘chirish (faqat PENDING bo'lsa)
+ *  - return_items
+ *  - warehouse_movements (RETURN/RETURN_CANCEL)
+ *  - returns
+ */
+async function deleteReturn(returnId) {
+  await run('BEGIN TRANSACTION');
+
+  try {
+    const header = await get(
+      `SELECT id, status FROM returns WHERE id = ?`,
+      [returnId]
+    );
+
+    if (!header) {
+      throw new Error('Qaytish topilmadi.');
+    }
+
+    if (header.status !== 'PENDING') {
+      throw new Error("Faqat kutilayotgan vazvratni o‘chirish mumkin.");
+    }
+
+    await run(
+      `
+        DELETE FROM warehouse_movements
+        WHERE source_id = ? AND source_type IN ('RETURN', 'RETURN_CANCEL')
+      `,
+      [returnId]
+    );
+
+    await run(
+      `DELETE FROM return_items WHERE return_id = ?`,
+      [returnId]
+    );
+
+    await run(
+      `DELETE FROM returns WHERE id = ?`,
+      [returnId]
+    );
+
+    await run('COMMIT');
+  } catch (err) {
+    await run('ROLLBACK');
+    throw err;
+  }
 }
 
 module.exports = {
-    createReturn,
-    listReturns,
-    getReturnById,
-    approveReturnAllPending,
-    approveReturnItem,
-    cancelReturnItem,
+  createReturn,
+  listReturns,
+  getReturnById,
+  approveReturnAllPending,
+  approveReturnItem,
+  cancelReturnItem,
+  // 🔴 yangi funksiya exportlari:
+  updateReturn,
+  deleteReturn,
 };
+
+

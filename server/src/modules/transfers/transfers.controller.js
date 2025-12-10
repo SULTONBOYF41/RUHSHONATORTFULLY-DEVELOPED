@@ -4,8 +4,7 @@ const service = require("./transfers.service");
 
 async function createTransfer(req, res) {
     try {
-        const user = req.user || null; // auth middleware dan keladi (agar ulangan bo‘lsa)
-
+        const user = req.user || null;
         const transfer = await service.createTransfer(req.body || {}, user);
         res.status(201).json(transfer);
     } catch (err) {
@@ -98,6 +97,43 @@ async function rejectItem(req, res) {
     }
 }
 
+/**
+ * Transferni tahrirlash
+ */
+async function updateTransfer(req, res) {
+    try {
+        const user = req.user || null;
+        const id = Number(req.params.id);
+        if (!id) return res.status(400).json({ message: "Noto'g'ri ID" });
+
+        const updated = await service.updateTransfer(id, req.body || {}, user);
+        res.json(updated);
+    } catch (err) {
+        console.error("updateTransfer error:", err);
+        res
+            .status(400)
+            .json({ message: err.message || "Transferni tahrirlashda xatolik" });
+    }
+}
+
+/**
+ * Transferni bekor qilish / o‘chirish
+ */
+async function cancelTransfer(req, res) {
+    try {
+        const id = Number(req.params.id);
+        if (!id) return res.status(400).json({ message: "Noto'g'ri ID" });
+
+        await service.cancelTransfer(id);
+        res.json({ success: true });
+    } catch (err) {
+        console.error("cancelTransfer error:", err);
+        res
+            .status(400)
+            .json({ message: err.message || "Transferni bekor qilishda xatolik" });
+    }
+}
+
 module.exports = {
     createTransfer,
     getAllTransfers,
@@ -105,4 +141,6 @@ module.exports = {
     getIncomingForBranch,
     acceptItem,
     rejectItem,
+    updateTransfer,
+    cancelTransfer,
 };

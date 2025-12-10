@@ -111,6 +111,40 @@ async function cancelReturnItem(req, res) {
     }
 }
 
+async function updateReturn(req, res) {
+    try {
+        const user = req.user || null;
+        const { id } = req.params;
+        const payload = req.body || {};
+
+        const updated = await service.updateReturn(id, payload, user);
+        res.json(updated);
+    } catch (err) {
+        console.error('updateReturn error:', err);
+        res
+            .status(400)
+            .json({ message: err.message || 'Qaytishni tahrirlashda xatolik' });
+    }
+}
+
+/**
+ * Qaytishni o'chirish (DELETE /api/returns/:id)
+ */
+async function deleteReturn(req, res) {
+    try {
+        const user = req.user || null;
+        const { id } = req.params;
+
+        await service.deleteReturn(id, user);
+        res.json({ success: true });
+    } catch (err) {
+        console.error('deleteReturn error:', err);
+        res
+            .status(400)
+            .json({ message: err.message || 'Qaytishni o‘chirishda xatolik' });
+    }
+}
+
 module.exports = {
     createReturn,
     listReturns,
@@ -118,4 +152,6 @@ module.exports = {
     approveReturn,
     approveReturnItem,
     cancelReturnItem,
+    updateReturn,
+    deleteReturn,
 };

@@ -148,6 +148,88 @@ async function cancelReturnItem(id, itemId, user) {
     await repo.cancelReturnItem(id, itemId, user.id);
 }
 
+/**
+ * Qaytishni tahrirlash (faqat PENDING)
+ *  - branch: faqat o'z filialidagi qaytishni tahrirlaydi
+ *  - admin: istalgan PENDING qaytishni tahrirlay oladi
+ */
+async function updateReturn(id, payload, user) {
+    if (!user) {
+        throw new Error('Foydalanuvchi aniqlanmadi.');
+    }
+
+    if (user.role !== 'branch' && user.role !== 'admin') {
+        throw new Error('Sizda qaytishni tahrirlash huquqi yo‘q.');
+    }
+
+    validateReturnInput(payload);
+
+    const existing = await repo.getReturnById(id);
+    if (!existing) {
+        throw new Error('Qaytish topilmadi.');
+    }
+
+    if (existing.header.status !== 'PENDING') {
+        throw new Error('Faqat kutilayotgan vazvratni tahrirlash mumkin.');
+    }
+
+    let branchId = null;
+
+    if (user.role === 'branch') {
+        if (existing.header.branch_id !== user.branch_id) {
+            throw new Error('Bu qaytishga kirish huquqingiz yo‘q.');
+        }
+        branchId = existing.header.branch_id;
+    } else if (user.role === 'admin') {
+        // Admin branchni ham o‘zgartira olishi mumkin, hozircha optional
+        branchId = payload.branch_id || existing.header.branch_id;
+    }
+
+    if (!branchId) {
+        throw new Error('Filial aniqlanmadi.');
+    }
+
+    const updated = await repo.updateReturn(id, {
+        branchId,
+        date: payload.date,
+        comment: payload.comment,
+        items: payload.items,
+        userId: user.id,
+    });
+
+    return updated;
+}
+
+/**
+ * Qaytishni o‘chirish (faqat PENDING)
+ *  - branch: faqat o'z filialidagi qaytishni o'chira oladi
+ *  - admin: istalgan PENDING qaytishni o‘chira oladi
+ */
+async function deleteReturn(id, user) {
+    if (!user) {
+        throw new Error('Foydalanuvchi aniqlanmadi.');
+    }
+
+    if (user.role !== 'branch' && user.role !== 'admin') {
+        throw new Error('Sizda qaytishni o‘chirish huquqi yo‘q.');
+    }
+
+    const existing = await repo.getReturnById(id);
+    if (!existing) {
+        throw new Error('Qaytish topilmadi.');
+    }
+
+    if (existing.header.status !== 'PENDING') {
+        throw new Error('Faqat kutilayotgan vazvratni o‘chirish mumkin.');
+    }
+
+    if (user.role === 'branch' && existing.header.branch_id !== user.branch_id) {
+        throw new Error('Bu qaytishga kirish huquqingiz yo‘q.');
+    }
+
+    await repo.deleteReturn(id);
+}
+
 module.exports = {
     createReturn,
     listReturns,
@@ -155,4 +237,7 @@ module.exports = {
     approveReturn,
     approveReturnItem,
     cancelReturnItem,
+    // 🔴 yangi servislar
+    updateReturn,
+    deleteReturn,
 };

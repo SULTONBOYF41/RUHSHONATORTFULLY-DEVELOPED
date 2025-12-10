@@ -1,37 +1,42 @@
+// server/src/modules/reports/reports.repository.js
 const { get, all } = require('../../db/connection');
 
-/**
- * Hisobot uchun umumiy ma'lumotlarni qaytaradi:
- * - filiallar soni
- * - foydalanuvchilar soni
- * - mahsulotlar soni
- * - kunlik savdo (summa + cheklar soni)
- * - TOP mahsulotlar (shu kun bo‘yicha)
- * - oylik savdo (kunlar kesimida) -> monthlySales
- * - kunlik xarajatlar (jami) -> totalExpenses
- * - sof foyda -> profit
- * - ishlab chiqarish (partiyalar soni va umumiy miqdor)
- * - filiallar bo‘yicha savdo -> salesByBranch
- * - xarajat turlari bo‘yicha -> expensesByType
- */
 async function getOverview(date) {
-  // 1) Umumiy sonlar
+  // 1) Filiallar (oddiy branchlar)
   const branchesRow = await get(
-    `SELECT COUNT(*) AS total FROM branches WHERE is_active = 1`,
+    `
+      SELECT COUNT(*) AS total
+      FROM branches
+      WHERE is_active = 1
+        AND (UPPER(branch_type) = 'BRANCH' OR branch_type IS NULL)
+    `,
     []
   );
 
+  // 2) Ulgurji do'konlar (OUTLET)
+  const outletsRow = await get(
+    `
+      SELECT COUNT(*) AS total
+      FROM branches
+      WHERE is_active = 1
+        AND UPPER(branch_type) = 'OUTLET'
+    `,
+    []
+  );
+
+  // 3) Foydalanuvchilar
   const usersRow = await get(
     `SELECT COUNT(*) AS total FROM users WHERE is_active = 1`,
     []
   );
 
+  // 4) Mahsulotlar
   const productsRow = await get(
     `SELECT COUNT(*) AS total FROM products`,
     []
   );
 
-  // 2) Kunlik savdo
+  // 5) Kunlik savdo (jami va cheklar soni)
   const salesRow = await get(
     `
       SELECT 
@@ -43,17 +48,17 @@ async function getOverview(date) {
     [date]
   );
 
-  // 3) Eng ko‘p sotilgan mahsulotlar (shu kun bo‘yicha)
+  // 6) Eng ko‘p sotilgan mahsulotlar (shu kun)
   const topProducts = await all(
     `
       SELECT
-        p.id AS product_id,
+        p.id   AS product_id,
         p.name AS product_name,
         b.name AS branch_name,
-        SUM(si.quantity) AS sold_quantity,
+        SUM(si.quantity)        AS sold_quantity,
         IFNULL(SUM(si.total_price), 0) AS total_amount
       FROM sale_items si
-      JOIN sales s ON s.id = si.sale_id
+      JOIN sales    s ON s.id = si.sale_id
       JOIN products p ON p.id = si.product_id
       LEFT JOIN branches b ON b.id = s.branch_id
       WHERE s.sale_date = ?
@@ -64,7 +69,7 @@ async function getOverview(date) {
     [date]
   );
 
-  // 4) Oylik savdo (shu sananing oyi bo‘yicha, har bir kun)
+  // 7) Oylik savdo (shu sananing oyi bo‘yicha)
   const monthlySales = await all(
     `
       SELECT
@@ -79,9 +84,7 @@ async function getOverview(date) {
     [date]
   );
 
-  // 5) Kunlik xarajatlar (jami)
-  //    EHTIYOT: expense_items da 'price' emas, 'total_price' bor.
-  //    Xarajat sanasi sifatida DATE(e.created_at) ni ishlatamiz.
+  // 8) Kunlik xarajatlar (jami)
   const expenseTotalRow = await get(
     `
       SELECT
@@ -93,7 +96,7 @@ async function getOverview(date) {
     [date]
   );
 
-  // 6) Xarajat turlari bo‘yicha (ingredients / decor / utility)
+  // 9) Xarajat turlari bo‘yicha
   const expensesByType = await all(
     `
       SELECT
@@ -107,7 +110,7 @@ async function getOverview(date) {
     [date]
   );
 
-  // 7) Ishlab chiqarish bo‘yicha ma'lumot (shu kun)
+  // 10) Ishlab chiqarish bo‘yicha ma'lumot
   const productionRow = await get(
     `
       SELECT
@@ -120,11 +123,11 @@ async function getOverview(date) {
     [date]
   );
 
-  // 8) Filiallar bo‘yicha savdo (shu kun)
+  // 11) Filiallar bo‘yicha savdo (shu kun)
   const salesByBranch = await all(
     `
       SELECT
-        b.id AS branch_id,
+        b.id   AS branch_id,
         b.name AS branch_name,
         IFNULL(SUM(s.total_amount), 0) AS total_amount,
         COUNT(s.id) AS sale_count
@@ -145,6 +148,7 @@ async function getOverview(date) {
   return {
     stats: {
       totalBranches: branchesRow?.total || 0,
+      totalOutlets: outletsRow?.total || 0,   // 👈 endi shu ishlaydi
       totalUsers: usersRow?.total || 0,
       totalProducts: productsRow?.total || 0,
       todaySalesAmount,
