@@ -1,5 +1,9 @@
+// client/src/pages/UsersPage.jsx
 import { useEffect, useState } from "react";
 import api from "../services/api";
+
+import UsersForm from "../components/users/UsersForm";
+import UsersTable from "../components/users/UsersTable";
 
 function UsersPage() {
     const [users, setUsers] = useState([]);
@@ -81,7 +85,6 @@ function UsersPage() {
             return;
         }
 
-        // parol: yangi userda majburiy, editda ixtiyoriy
         if (!editingId) {
             if (!form.password) {
                 setError("Parol majburiy");
@@ -89,7 +92,7 @@ function UsersPage() {
             }
             payload.password = form.password;
         } else if (form.password) {
-            payload.password = form.password; // faqat kiritilsa parol yangilanadi
+            payload.password = form.password;
         }
 
         try {
@@ -109,7 +112,8 @@ function UsersPage() {
             resetForm();
         } catch (err) {
             console.error(err);
-            const msg = err.response?.data?.message || "Userni saqlashda xatolik";
+            const msg =
+                err.response?.data?.message || "Userni saqlashda xatolik";
             setError(msg);
         } finally {
             setSaving(false);
@@ -149,20 +153,6 @@ function UsersPage() {
         }
     };
 
-    const getBranchLabel = (user) => {
-        // backend join bilan branch_name yuborgan bo'lishi mumkin
-        if (user.branch_name) {
-            if (user.branch_code) {
-                return `${user.branch_name} (${user.branch_code})`;
-            }
-            return user.branch_name;
-        }
-        if (!user.branch_id) return "-";
-        const b = branches.find((br) => br.id === user.branch_id);
-        if (!b) return user.branch_id;
-        return b.code ? `${b.name} (${b.code})` : b.name;
-    };
-
     return (
         <div className="page">
             <div className="page-header">
@@ -182,7 +172,7 @@ function UsersPage() {
                         style={{
                             marginBottom: 12,
                             padding: 8,
-                            borderRadius: 6,
+                            borderRadius: 8,
                             background: "#ffe5e5",
                             color: "#a20000",
                             fontSize: 13,
@@ -192,182 +182,25 @@ function UsersPage() {
                     </div>
                 )}
 
-                <form onSubmit={handleSubmit}>
-                    <div className="form-row">
-                        <div>
-                            <label>To‘liq ism</label>
-                            <input
-                                className="input"
-                                name="full_name"
-                                value={form.full_name}
-                                onChange={handleChange}
-                                required
-                            />
-                        </div>
-                        <div>
-                            <label>Username</label>
-                            <input
-                                className="input"
-                                name="username"
-                                value={form.username}
-                                onChange={handleChange}
-                                required
-                            />
-                        </div>
-                    </div>
-
-                    <div className="form-row">
-                        <div>
-                            <label>
-                                Parol {editingId ? " (yangi parol, ixtiyoriy)" : ""}
-                            </label>
-                            <input
-                                className="input"
-                                name="password"
-                                type="password"
-                                value={form.password}
-                                onChange={handleChange}
-                                placeholder={editingId ? "O'zgartirmaslik uchun bo'sh qoldiring" : ""}
-                                required={!editingId}
-                            />
-                        </div>
-                        <div>
-                            <label>Role</label>
-                            <select
-                                className="input"
-                                name="role"
-                                value={form.role}
-                                onChange={handleChange}
-                            >
-                                <option value="admin">admin</option>
-                                <option value="branch">branch</option>
-                                <option value="production">production</option>
-                                <option value="director">director</option>
-                            </select>
-                        </div>
-                    </div>
-
-                    {form.role === "branch" && (
-                        <div className="form-row">
-                            <div>
-                                <label>Filial</label>
-                                <select
-                                    className="input"
-                                    name="branch_id"
-                                    value={form.branch_id}
-                                    onChange={handleChange}
-                                    required
-                                >
-                                    <option value="">Tanlang...</option>
-                                    {branches.map((b) => (
-                                        <option key={b.id} value={b.id}>
-                                            {b.name} {b.code ? `(${b.code})` : ""}
-                                        </option>
-                                    ))}
-                                </select>
-                            </div>
-                        </div>
-                    )}
-
-                    <div style={{ marginTop: 12, display: "flex", gap: 8 }}>
-                        <button
-                            type="submit"
-                            className="button-primary"
-                            disabled={saving}
-                        >
-                            {saving
-                                ? "Saqlanmoqda..."
-                                : editingId
-                                    ? "O'zgartirishni saqlash"
-                                    : "User qo‘shish"}
-                        </button>
-
-                        {editingId && (
-                            <button
-                                type="button"
-                                className="button-primary"
-                                style={{
-                                    background: "transparent",
-                                    border: "1px solid rgba(148,163,184,0.7)",
-                                    boxShadow: "none",
-                                    color: "#e5e7eb",
-                                }}
-                                onClick={handleCancelEdit}
-                            >
-                                Bekor qilish
-                            </button>
-                        )}
-                    </div>
-                </form>
+                <UsersForm
+                    form={form}
+                    branches={branches}
+                    editingId={editingId}
+                    saving={saving}
+                    onChange={handleChange}
+                    onSubmit={handleSubmit}
+                    onCancelEdit={handleCancelEdit}
+                />
 
                 <hr style={{ margin: "20px 0" }} />
 
-                {loading ? (
-                    <p>Yuklanmoqda...</p>
-                ) : users.length === 0 ? (
-                    <p>Hali userlar yo‘q.</p>
-                ) : (
-                    <div className="table-wrapper">
-                        <table className="table">
-                            <thead>
-                                <tr>
-                                    <th>ID</th>
-                                    <th>Ism</th>
-                                    <th>Username</th>
-                                    <th>Role</th>
-                                    <th>Branch</th>
-                                    <th style={{ width: 120 }}>Amallar</th>
-                                </tr>
-                            </thead>
-                            <tbody>
-                                {users.map((u) => (
-                                    <tr key={u.id}>
-                                        <td>{u.id}</td>
-                                        <td>{u.full_name}</td>
-                                        <td>{u.username}</td>
-                                        <td>{u.role}</td>
-                                        <td>{getBranchLabel(u)}</td>
-                                        <td>
-                                            <div
-                                                style={{
-                                                    display: "flex",
-                                                    gap: 6,
-                                                    justifyContent: "flex-start",
-                                                }}
-                                            >
-                                                <button
-                                                    type="button"
-                                                    className="button-primary"
-                                                    style={{
-                                                        padding: "3px 8px",
-                                                        fontSize: 11,
-                                                        boxShadow: "none",
-                                                    }}
-                                                    onClick={() => handleEdit(u)}
-                                                >
-                                                    Edit
-                                                </button>
-                                                <button
-                                                    type="button"
-                                                    className="button-primary"
-                                                    style={{
-                                                        padding: "3px 8px",
-                                                        fontSize: 11,
-                                                        boxShadow: "none",
-                                                        background: "#dc2626",
-                                                    }}
-                                                    onClick={() => handleDelete(u)}
-                                                >
-                                                    Delete
-                                                </button>
-                                            </div>
-                                        </td>
-                                    </tr>
-                                ))}
-                            </tbody>
-                        </table>
-                    </div>
-                )}
+                <UsersTable
+                    users={users}
+                    branches={branches}
+                    loading={loading}
+                    onEdit={handleEdit}
+                    onDelete={handleDelete}
+                />
             </div>
         </div>
     );

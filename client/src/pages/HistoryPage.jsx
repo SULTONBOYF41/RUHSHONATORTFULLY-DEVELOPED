@@ -1,33 +1,15 @@
 // client/src/pages/HistoryPage.jsx
 import React, { useEffect, useState } from "react";
+import { useNavigate } from "react-router-dom";
 import api from "../services/api";
 import { useAuth } from "../context/AuthContext";
 
-function formatTypeLabel(type) {
-    if (!type) return "—";
-    switch (type) {
-        case "sales":
-            return "Sotuv";
-        case "transfer":
-            return "Transfer";
-        case "production":
-            return "Ishlab chiqarish";
-        case "return":
-            return "Vazvrat";
-        default:
-            return type;
-    }
-}
-
-function formatAmount(amount) {
-    if (amount == null) return "—";
-    const num = Number(amount);
-    if (!Number.isFinite(num)) return "—";
-    return num.toLocaleString("uz-UZ") + " so‘m";
-}
+import HistoryFilters from "../components/history/HistoryFilters";
+import HistoryTable from "../components/history/HistoryTable";
 
 function HistoryPage() {
     const { user } = useAuth(); // { id, role, branch_id, branch_name }
+    const navigate = useNavigate();
 
     const isAdmin = user?.role === "admin";
     const isProduction = user?.role === "production";
@@ -36,15 +18,21 @@ function HistoryPage() {
     const [items, setItems] = useState([]);
     const [loading, setLoading] = useState(false);
 
-    // Admin filter states
+    // Filtrlar (faqat admin uchun)
     const [typeFilter, setTypeFilter] = useState("all");
     const [branchFilter, setBranchFilter] = useState("all");
     const [fromDate, setFromDate] = useState("");
     const [toDate, setToDate] = useState("");
 
+    // Xabarlar
+    const [error, setError] = useState("");
+    const [success, setSuccess] = useState("");
+
     const loadHistory = async () => {
         try {
             setLoading(true);
+            setError("");
+            setSuccess("");
 
             const params = {};
 
@@ -60,7 +48,7 @@ function HistoryPage() {
             }
 
             if (isSales) {
-                params.type = "sales";
+                params.type = "sale";
                 params.branch_id = user.branch_id;
             }
 
@@ -68,6 +56,7 @@ function HistoryPage() {
             setItems(res.data || []);
         } catch (err) {
             console.error("History load error:", err);
+            setError("Tarixni yuklashda xatolik.");
         } finally {
             setLoading(false);
         }
@@ -78,64 +67,68 @@ function HistoryPage() {
         // eslint-disable-next-line react-hooks/exhaustive-deps
     }, [typeFilter, branchFilter, fromDate, toDate]);
 
+    // --- Amal tugmalari handlerlari ---
+
+    const handleEdit = (row) => {
+        // Hozircha faqat vazvrat tahriri ReturnsPage ga olib boradi
+        if (row.type === "return") {
+            navigate(`/returns?edit=${row.id}`);
+            return;
+        }
+
+        // Keyinchalik transfer / sale / production uchun ham shu yerda yo'naltiramiz
+        setSuccess("");
+        setError("Bu tur uchun tahrirlash hali yoqilgan emas.");
+    };
+
+    const handleDelete = async (row) => {
+        // Hozircha faqat vazvratni o'chirish backendiga ulangan
+        if (row.type !== "return") {
+            setError("Bu turdagi tarixni o‘chirish hali yoqilmagan.");
+            return;
+        }
+
+        if (
+            !window.confirm(
+                "Rostdan ham bu vazvratni o‘chirishni xohlaysizmi? (faqat PENDING bo‘lsa o‘chadi)"
+            )
+        ) {
+            return;
+        }
+
+        try {
+            setError("");
+            setSuccess("");
+
+            await api.delete(`/returns/${row.id}`);
+            setSuccess("Vazvrat muvaffaqiyatli o‘chirildi.");
+
+            await loadHistory();
+        } catch (err) {
+            console.error("History delete error:", err);
+            const msg =
+                err?.response?.data?.message ||
+                "Tarixdagi vazvratni o‘chirishda xatolik.";
+            setError(msg);
+        }
+    };
+
     return (
         <div className="page">
             <h1 className="page-title">Umumiy tarix</h1>
 
-            {/* ADMIN FILTERLAR */}
-            {isAdmin && (
-                <div
-                    className="filters"
-                    style={{
-                        display: "flex",
-                        flexWrap: "wrap",
-                        gap: 12,
-                        marginBottom: 12,
-                    }}
-                >
-                    <select
-                        className="input"
-                        value={typeFilter}
-                        onChange={(e) => setTypeFilter(e.target.value)}
-                    >
-                        <option value="all">Turlar: barchasi</option>
-                        <option value="sales">Sotuv</option>
-                        <option value="transfer">Transfer</option>
-                        <option value="production">Ishlab chiqarish</option>
-                        <option value="return">Vazvrat</option>
-                    </select>
-
-                    {/* Agar sendan branchlar ro‘yxatini olish kerak bo‘lsa,
-              keyin alohida branchlar API’sidan yuklab, shu yerda map qilamiz.
-              Hozircha filter strukturasi tayyor tursin. */}
-                    <select
-                        className="input"
-                        value={branchFilter}
-                        onChange={(e) => setBranchFilter(e.target.value)}
-                    >
-                        <option value="all">Filiallar: barchasi</option>
-                        {/* <option value="1">Chilonzor</option> ... */}
-                    </select>
-
-                    <input
-                        type="date"
-                        className="input"
-                        value={fromDate}
-                        onChange={(e) => setFromDate(e.target.value)}
-                    />
-
-                    <input
-                        type="date"
-                        className="input"
-                        value={toDate}
-                        onChange={(e) => setToDate(e.target.value)}
-                    />
-
-                    <button className="btn btn-primary" onClick={loadHistory}>
-                        Yangilash
-                    </button>
-                </div>
-            )}
+            <HistoryFilters
+                isAdmin={isAdmin}
+                typeFilter={typeFilter}
+                branchFilter={branchFilter}
+                fromDate={fromDate}
+                toDate={toDate}
+                onTypeChange={setTypeFilter}
+                onBranchChange={setBranchFilter}
+                onFromDateChange={setFromDate}
+                onToDateChange={setToDate}
+                onRefresh={loadHistory}
+            />
 
             {isProduction && (
                 <p className="info">
@@ -150,49 +143,31 @@ function HistoryPage() {
                 </p>
             )}
 
-            {/* TARIX JADVALI */}
-            <div className="card" style={{ marginTop: 20 }}>
-                <div className="table-wrapper">
-                    {loading ? (
-                        <p>Yuklanmoqda...</p>
-                    ) : (
-                        <table className="table">
-                            <thead>
-                                <tr>
-                                    <th>#</th>
-                                    <th>Sana</th>
-                                    <th>Turi</th>
-                                    <th>Filial / Yo‘nalish</th>
-                                    <th>Izoh</th>
-                                    <th>Summasi</th>
-                                    <th>Status</th>
-                                </tr>
-                            </thead>
-                            <tbody>
-                                {items.length === 0 ? (
-                                    <tr>
-                                        <td colSpan="7" style={{ textAlign: "center" }}>
-                                            Ma’lumot topilmadi
-                                        </td>
-                                    </tr>
-                                ) : (
-                                    items.map((row, i) => (
-                                        <tr key={`${row.type}-${row.id}-${row.activity_date}`}>
-                                            <td>{i + 1}</td>
-                                            <td>{row.activity_date}</td>
-                                            <td>{formatTypeLabel(row.type)}</td>
-                                            <td>{row.branch_name || "—"}</td>
-                                            <td>{row.description || "—"}</td>
-                                            <td>{formatAmount(row.amount)}</td>
-                                            <td>{row.status || "—"}</td>
-                                        </tr>
-                                    ))
-                                )}
-                            </tbody>
-                        </table>
-                    )}
+            {error && (
+                <div
+                    className="info-box info-box--error"
+                    style={{ marginBottom: 8, marginTop: 8 }}
+                >
+                    {error}
                 </div>
-            </div>
+            )}
+
+            {success && (
+                <div
+                    className="info-box info-box--success"
+                    style={{ marginBottom: 8, marginTop: 8 }}
+                >
+                    {success}
+                </div>
+            )}
+
+            <HistoryTable
+                items={items}
+                loading={loading}
+                isAdmin={isAdmin}
+                onEdit={handleEdit}
+                onDelete={handleDelete}
+            />
         </div>
     );
 }

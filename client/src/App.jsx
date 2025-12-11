@@ -128,7 +128,7 @@ function App() {
                   <Link className={isActive("/products")} to="/products">
                     <span className="app-nav-icon">🍰</span>
                     {!sidebarCollapsed && (
-                      <span className="app-nav-label">Mahsulotlar</span>
+                      <span className="app-nav-label">Asosiy Catalog</span>
                     )}
                   </Link>
 

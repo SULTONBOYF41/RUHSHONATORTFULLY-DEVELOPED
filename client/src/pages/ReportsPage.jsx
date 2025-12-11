@@ -1,5 +1,12 @@
+// client/src/pages/ReportsPage.jsx
 import React, { useEffect, useState, useMemo } from "react";
 import api from "../services/api";
+
+import ReportSummaryCards from "../components/reports/ReportSummaryCards";
+import SalesByBranchTable from "../components/reports/SalesByBranchTable";
+import ExpensesByTypeTable from "../components/reports/ExpensesByTypeTable";
+import TopProductsTable from "../components/reports/TopProductsTable";
+import MonthlySalesChart from "../components/reports/MonthlySalesChart";
 
 function ReportsPage() {
     const [stats, setStats] = useState(null);
@@ -12,7 +19,7 @@ function ReportsPage() {
     const [error, setError] = useState("");
     const [date, setDate] = useState(() => {
         const now = new Date();
-        return now.toISOString().slice(0, 10); // YYYY-MM-DD
+        return now.toISOString().slice(0, 10);
     });
 
     const fetchOverview = async (selectedDate) => {
@@ -44,20 +51,28 @@ function ReportsPage() {
     const summaryCards = useMemo(() => {
         if (!stats) return [];
 
-        const cards = [
+        const totalBranches = stats.totalBranches ?? 0;
+        const totalOutlets = stats.totalOutlets ?? 0;
+
+        return [
             {
-                title: "Filiallar soni",
-                value: stats.totalBranches,
-                subtitle: "Faol filiallar",
+                title: "Filiallar",
+                value: totalBranches,
+                subtitle: "Faol filiallar soni",
+            },
+            {
+                title: "Faol ulgurji do‘konlar",
+                value: totalOutlets,
+                subtitle: "Do‘kon modulidagi aktiv outletlar",
             },
             {
                 title: "Foydalanuvchilar",
-                value: stats.totalUsers,
+                value: stats.totalUsers ?? 0,
                 subtitle: "Admin va xodimlar",
             },
             {
                 title: "Mahsulotlar",
-                value: stats.totalProducts,
+                value: stats.totalProducts ?? 0,
                 subtitle: "Aktiv menyu pozitsiyalari",
             },
             {
@@ -81,11 +96,10 @@ function ReportsPage() {
                 title: "Ishlab chiqarish",
                 value: (stats.productionQuantity || 0).toLocaleString("uz-UZ"),
                 subtitle:
-                    (stats.productionBatchCount || 0) + " ta partiya (miqdor yig‘indisi)",
+                    (stats.productionBatchCount || 0) +
+                    " ta partiya (miqdor yig‘indisi)",
             },
         ];
-
-        return cards;
     }, [stats]);
 
     // Oylik savdo uchun bar-chart data
@@ -99,7 +113,6 @@ function ReportsPage() {
         return monthlySales.map((item) => {
             const amount = item.total_amount || 0;
             const width = maxAmount ? Math.round((amount / maxAmount) * 100) : 0;
-
             const label = item.sale_date ? item.sale_date.slice(5) : "";
 
             return {
@@ -124,14 +137,24 @@ function ReportsPage() {
         }
     };
 
+    const locationTypeLabel = (rawType) => {
+        const t = String(rawType || "").toUpperCase();
+        if (t === "BRANCH") return "Filial";
+        if (t === "OUTLET" || t === "SHOP" || t === "STORE") return "Do‘kon";
+        return "—";
+    };
+
+    const monthLabel = date.slice(0, 7);
+
     return (
         <div className="page">
             <div className="page-header">
                 <div>
                     <h1 className="page-title">Hisobotlar</h1>
                     <p className="page-subtitle">
-                        Ruxshona Tort tarmog‘i bo‘yicha kunlik va oylik statistik
-                        ma’lumotlar: savdo, xarajatlar, sof foyda va ishlab chiqarish.
+                        Ruxshona Tort tarmog‘i bo‘yicha filiallar, do‘konlar, kunlik va
+                        oylik statistik ma’lumotlar: savdo, xarajatlar, sof foyda va
+                        ishlab chiqarish.
                     </p>
                 </div>
 
@@ -146,7 +169,10 @@ function ReportsPage() {
             </div>
 
             {error && (
-                <div className="info-box info-box--error" style={{ marginBottom: 8 }}>
+                <div
+                    className="info-box info-box--error"
+                    style={{ marginBottom: 8 }}
+                >
                     {error}
                 </div>
             )}
@@ -156,186 +182,34 @@ function ReportsPage() {
             ) : (
                 <>
                     {/* Umumiy kartochkalar */}
-                    <div className="card-grid card-grid-4">
-                        {summaryCards.map((card, idx) => (
-                            <div key={idx} className="card">
-                                <div className="card-title">{card.title}</div>
-                                <div className="card-value">{card.value}</div>
-                                <div className="card-subtitle">{card.subtitle}</div>
-                            </div>
-                        ))}
-                    </div>
+                    <ReportSummaryCards cards={summaryCards} />
 
-                    {/* Filiallar bo‘yicha savdo */}
-                    <div className="page-section">
-                        <div className="page-section-header">
-                            <h2 className="page-section-title">
-                                Filiallar bo‘yicha kunlik savdo
-                            </h2>
-                            <p className="page-section-subtitle">Sana: {date}</p>
-                        </div>
+                    {/* Filial / do‘konlar bo‘yicha savdo */}
+                    <SalesByBranchTable
+                        date={date}
+                        salesByBranch={salesByBranch}
+                        locationTypeLabel={locationTypeLabel}
+                    />
 
-                        <div className="card">
-                            <div className="table-wrapper">
-                                <table className="table">
-                                    <thead>
-                                        <tr>
-                                            <th>#</th>
-                                            <th>Filial</th>
-                                            <th>Cheklar soni</th>
-                                            <th>Savdo summasi (so‘m)</th>
-                                        </tr>
-                                    </thead>
-                                    <tbody>
-                                        {(!salesByBranch || salesByBranch.length === 0) ? (
-                                            <tr>
-                                                <td colSpan="4" style={{ textAlign: "center" }}>
-                                                    Ushbu sana uchun savdo topilmadi.
-                                                </td>
-                                            </tr>
-                                        ) : (
-                                            salesByBranch.map((row, index) => (
-                                                <tr key={(row.branch_id || "null") + "-" + index}>
-                                                    <td>{index + 1}</td>
-                                                    <td>{row.branch_name || "—"}</td>
-                                                    <td>{row.sale_count}</td>
-                                                    <td>
-                                                        {(row.total_amount || 0).toLocaleString("uz-UZ")}
-                                                    </td>
-                                                </tr>
-                                            ))
-                                        )}
-                                    </tbody>
-                                </table>
-                            </div>
-                        </div>
-                    </div>
+                    {/* Xarajat turlari bo‘yicha */}
+                    <ExpensesByTypeTable
+                        date={date}
+                        expensesByType={expensesByType}
+                        expenseTypeLabel={expenseTypeLabel}
+                    />
 
-                    {/* Xarajatlar turlari bo‘yicha */}
-                    <div className="page-section">
-                        <div className="page-section-header">
-                            <h2 className="page-section-title">
-                                Xarajatlar taqsimoti (turlar bo‘yicha)
-                            </h2>
-                            <p className="page-section-subtitle">Sana: {date}</p>
-                        </div>
-
-                        <div className="card">
-                            {(!expensesByType || expensesByType.length === 0) ? (
-                                <p>Ushbu sana uchun xarajatlar topilmadi.</p>
-                            ) : (
-                                <div className="table-wrapper">
-                                    <table className="table">
-                                        <thead>
-                                            <tr>
-                                                <th>#</th>
-                                                <th>Turi</th>
-                                                <th>Summasi (so‘m)</th>
-                                            </tr>
-                                        </thead>
-                                        <tbody>
-                                            {expensesByType.map((row, index) => (
-                                                <tr key={row.expense_type || index}>
-                                                    <td>{index + 1}</td>
-                                                    <td>{expenseTypeLabel(row.expense_type)}</td>
-                                                    <td>
-                                                        {(row.total_amount || 0).toLocaleString("uz-UZ")}
-                                                    </td>
-                                                </tr>
-                                            ))}
-                                        </tbody>
-                                    </table>
-                                </div>
-                            )}
-                        </div>
-                    </div>
-
-                    {/* TOP mahsulotlar jadvali */}
-                    <div className="page-section">
-                        <div className="page-section-header">
-                            <h2 className="page-section-title">
-                                Eng ko‘p sotilgan mahsulotlar
-                            </h2>
-                            <p className="page-section-subtitle">Sana: {date}</p>
-                        </div>
-
-                        <div className="card">
-                            {loading && <p>Jadval yangilanmoqda...</p>}
-
-                            <div className="table-wrapper">
-                                <table className="table">
-                                    <thead>
-                                        <tr>
-                                            <th>#</th>
-                                            <th>Mahsulot</th>
-                                            <th>Filial</th>
-                                            <th>Soni</th>
-                                            <th>Summasi (so‘m)</th>
-                                        </tr>
-                                    </thead>
-                                    <tbody>
-                                        {topProducts.length === 0 ? (
-                                            <tr>
-                                                <td colSpan="5" style={{ textAlign: "center" }}>
-                                                    Ushbu sana uchun savdo topilmadi.
-                                                </td>
-                                            </tr>
-                                        ) : (
-                                            topProducts.map((item, index) => (
-                                                <tr key={item.product_id + "-" + index}>
-                                                    <td>{index + 1}</td>
-                                                    <td>{item.product_name}</td>
-                                                    <td>{item.branch_name || "—"}</td>
-                                                    <td>{item.sold_quantity}</td>
-                                                    <td>
-                                                        {(item.total_amount || 0).toLocaleString("uz-UZ")}
-                                                    </td>
-                                                </tr>
-                                            ))
-                                        )}
-                                    </tbody>
-                                </table>
-                            </div>
-                        </div>
-                    </div>
+                    {/* TOP mahsulotlar */}
+                    <TopProductsTable
+                        date={date}
+                        topProducts={topProducts}
+                        loading={loading}
+                    />
 
                     {/* Oylik savdo bar-chart */}
-                    <div className="page-section">
-                        <div className="page-section-header">
-                            <h2 className="page-section-title">
-                                Oylik savdo dinamikasi (kunlar kesimida)
-                            </h2>
-                            <p className="page-section-subtitle">
-                                Sana bo‘yicha oy: {date.slice(0, 7)}
-                            </p>
-                        </div>
-
-                        <div className="card">
-                            {monthlyChartData.length === 0 ? (
-                                <p>Ushbu oy uchun savdo ma’lumotlari topilmadi.</p>
-                            ) : (
-                                <div className="report-bar-chart">
-                                    {monthlyChartData.map((item) => (
-                                        <div
-                                            key={item.sale_date}
-                                            className="report-bar-row"
-                                        >
-                                            <div className="report-bar-label">{item.label}</div>
-                                            <div className="report-bar">
-                                                <div
-                                                    className="report-bar-fill"
-                                                    style={{ width: item.width + "%" }}
-                                                />
-                                            </div>
-                                            <div className="report-bar-value">
-                                                {item.amount.toLocaleString("uz-UZ")} so‘m
-                                            </div>
-                                        </div>
-                                    ))}
-                                </div>
-                            )}
-                        </div>
-                    </div>
+                    <MonthlySalesChart
+                        monthLabel={monthLabel}
+                        monthlyChartData={monthlyChartData}
+                    />
                 </>
             )}
         </div>

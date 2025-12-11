@@ -3,6 +3,10 @@ import React, { useEffect, useMemo, useState } from "react";
 import api from "../services/api";
 import { useAuth } from "../context/AuthContext";
 
+import ExpensesTabs from "../components/expenses/ExpensesTabs";
+import ExpensesForm from "../components/expenses/ExpensesForm";
+import ExpensesList from "../components/expenses/ExpensesList";
+
 const TYPE_INGREDIENTS = "ingredients";
 const TYPE_DECOR = "decor";
 const TYPE_UTILITY = "utility";
@@ -17,7 +21,6 @@ function ExpensesPage() {
     const { user } = useAuth();
 
     const [activeTab, setActiveTab] = useState(TYPE_INGREDIENTS);
-
     const [date, setDate] = useState(() =>
         new Date().toISOString().slice(0, 10)
     );
@@ -32,10 +35,7 @@ function ExpensesPage() {
     const [loadingDecorProducts, setLoadingDecorProducts] = useState(false);
     const [loadingUtilityProducts, setLoadingUtilityProducts] = useState(false);
 
-    // Forma satrlari – universal strukturada
-    // unit_price:
-    //  - ingredients: birlik narxi
-    //  - decor & utility: JAMI SUMMA (umumiy)
+    // Forma satrlari
     const [items, setItems] = useState([
         { product_id: "", name: "", quantity: "", unit_price: "" },
     ]);
@@ -54,22 +54,15 @@ function ExpensesPage() {
     const isDecor = activeTab === TYPE_DECOR;
     const isUtility = activeTab === TYPE_UTILITY;
 
-    const productOptions = isIngredients
-        ? ingredientProducts
-        : isDecor
-            ? decorProducts
-            : utilityProducts;
-
     const productLabel = isIngredients
         ? "Masalliq *"
         : isDecor
             ? "Bezak mahsulot *"
             : "Kommunal to‘lov *";
 
-    // Umumiy summa (frontendda faqat ko‘rsatish uchun)
+    // Umumiy summa (faqat ko‘rsatish uchun)
     const totalCalculated = useMemo(() => {
         if (isIngredients) {
-            // masalliqlar: miqdor * birlik narxi
             return items.reduce((sum, row) => {
                 const q = Number(row.quantity || 0);
                 const p = Number(row.unit_price || 0);
@@ -78,7 +71,6 @@ function ExpensesPage() {
             }, 0);
         }
 
-        // bezaklar & kommunal: foydalanuvchi kiritgan JAMI SUMMA lar yig‘indisi
         return items.reduce((sum, row) => {
             const total = Number(row.unit_price || 0);
             if (!total) return sum;
@@ -86,16 +78,14 @@ function ExpensesPage() {
         }, 0);
     }, [items, isIngredients]);
 
-    // Mahsulotlarni yuklash: masalliq, dekor va kommunal
+    // Mahsulotlarni yuklash
     useEffect(() => {
         const loadIngredients = async () => {
             try {
                 setLoadingIngredientProducts(true);
                 const res = await api.get("/products");
                 const all = res.data || [];
-                const ingrs = all.filter(
-                    (p) => p.category === "INGREDIENT"
-                );
+                const ingrs = all.filter((p) => p.category === "INGREDIENT");
                 setIngredientProducts(ingrs);
             } catch (err) {
                 console.error("ingredient load error:", err);
@@ -164,17 +154,23 @@ function ExpensesPage() {
     const onTabChange = (tabKey) => {
         setActiveTab(tabKey);
         resetForm();
+        setError("");
+        setSuccess("");
     };
 
     const handleItemChange = (index, field, value) => {
+        const productOptions = isIngredients
+            ? ingredientProducts
+            : isDecor
+                ? decorProducts
+                : utilityProducts;
+
         setItems((prev) => {
             const copy = [...prev];
             const row = { ...copy[index], [field]: value };
 
             if (field === "product_id") {
-                const p = productOptions.find(
-                    (x) => String(x.id) === String(value)
-                );
+                const p = productOptions.find((x) => String(x.id) === String(value));
                 if (p) {
                     row.name = p.name;
                 }
@@ -212,13 +208,10 @@ function ExpensesPage() {
             if (!product_id) continue;
 
             if (isIngredients) {
-                // Masalliqlar – product tanlaydi, miqdor + birlik narxi
                 if (!quantity || quantity <= 0) continue;
                 if (!unit_price || unit_price <= 0) continue;
 
-                const p = ingredientProducts.find(
-                    (x) => x.id === product_id
-                );
+                const p = ingredientProducts.find((x) => x.id === product_id);
                 name = p?.name || name;
 
                 preparedItems.push({
@@ -228,7 +221,6 @@ function ExpensesPage() {
                     unit_price,
                 });
             } else if (isDecor) {
-                // Bezaklar – product, miqdor (ixtiyoriy), JAMI SUMMA
                 if (!unit_price || unit_price <= 0) continue;
 
                 if (!quantity || quantity <= 0) {
@@ -245,7 +237,6 @@ function ExpensesPage() {
                     unit_price: calculatedUnitPrice,
                 });
             } else if (isUtility) {
-                // Kommunal – product, JAMI SUMMA
                 if (!unit_price || unit_price <= 0) continue;
 
                 preparedItems.push({
@@ -266,9 +257,9 @@ function ExpensesPage() {
             setSaving(true);
 
             const payload = {
-                type: activeTab, // ingredients | decor | utility
-                date, // backendda expense_date ga aylantiriladi
-                description: "", // izohni ishlatmaymiz
+                type: activeTab,
+                date,
+                description: "",
                 items: preparedItems,
                 created_by: user?.id || null,
             };
@@ -306,10 +297,8 @@ function ExpensesPage() {
                     expense.items.map((it) => ({
                         product_id: it.product_id || "",
                         name: it.name || "",
-                        quantity:
-                            it.quantity != null ? String(it.quantity) : "",
-                        unit_price:
-                            it.unit_price != null ? String(it.unit_price) : "",
+                        quantity: it.quantity != null ? String(it.quantity) : "",
+                        unit_price: it.unit_price != null ? String(it.unit_price) : "",
                     }))
                 );
             } else {
@@ -317,8 +306,7 @@ function ExpensesPage() {
                     expense.items.map((it) => {
                         const q = Number(it.quantity || 0);
                         const p = Number(it.unit_price || 0);
-                        const lineTotal =
-                            q && p ? String(q * p) : p ? String(p) : "";
+                        const lineTotal = q && p ? String(q * p) : p ? String(p) : "";
 
                         return {
                             product_id: it.product_id || "",
@@ -327,7 +315,7 @@ function ExpensesPage() {
                                 expense.type === TYPE_DECOR && it.quantity != null
                                     ? String(it.quantity)
                                     : "",
-                            unit_price: lineTotal, // formdagi "Jami summa"
+                            unit_price: lineTotal,
                         };
                     })
                 );
@@ -355,8 +343,7 @@ function ExpensesPage() {
         } catch (err) {
             console.error("delete expense error:", err);
             const msg =
-                err?.response?.data?.message ||
-                "Xarajatni o‘chirishda xatolik.";
+                err?.response?.data?.message || "Xarajatni o‘chirishda xatolik.";
             setError(msg);
         }
     };
@@ -396,38 +383,11 @@ function ExpensesPage() {
             </div>
 
             {/* TABLAR */}
-            <div
-                className="tabs"
-                style={{
-                    marginBottom: 12,
-                    display: "flex",
-                    gap: 8,
-                    flexWrap: "wrap",
-                }}
-            >
-                {TABS.map((tab) => (
-                    <button
-                        key={tab.key}
-                        type="button"
-                        className={
-                            "button-primary" +
-                            (activeTab === tab.key ? "" : " button-secondary")
-                        }
-                        style={{
-                            padding: "10px 18px",
-                            fontSize: 14,
-                            boxShadow: "none",
-                            opacity: activeTab === tab.key ? 1 : 0.75,
-                            borderRadius: 12,
-                            minWidth: 180,
-                            textAlign: "center",
-                        }}
-                        onClick={() => onTabChange(tab.key)}
-                    >
-                        {tab.label}
-                    </button>
-                ))}
-            </div>
+            <ExpensesTabs
+                tabs={TABS}
+                activeTab={activeTab}
+                onTabChange={onTabChange}
+            />
 
             {error && (
                 <div className="info-box info-box--error" style={{ marginBottom: 8 }}>
@@ -442,355 +402,38 @@ function ExpensesPage() {
             )}
 
             {/* FORMA */}
-            <div className="card">
-                <div className="card-header">
-                    <div>
-                        <div className="card-title">{typeLabel} xarajati</div>
-                        <div className="card-subtitle">{currentTabInfo}</div>
-                    </div>
-                </div>
-
-                <form onSubmit={handleSubmit}>
-                    <div className="table-wrapper">
-                        <table className="table">
-                            <thead>
-                                <tr>
-                                    <th>#</th>
-                                    <th>{productLabel}</th>
-
-                                    {/* Miqdor – masalliqlar va bezaklar uchun */}
-                                    {!isUtility && <th>Miqdor</th>}
-
-                                    {/* Birlik narxi – faqat masalliqlar */}
-                                    {isIngredients && <th>Birlik narxi</th>}
-
-                                    {/* Jami / Jami summa kolonkalari */}
-                                    {isIngredients && <th>Jami</th>}
-                                    {!isIngredients && <th>Jami summa</th>}
-
-                                    <th />
-                                </tr>
-                            </thead>
-                            <tbody>
-                                {items.map((row, index) => {
-                                    const q = Number(row.quantity || 0);
-                                    const p = Number(row.unit_price || 0);
-                                    const total =
-                                        isIngredients && q && p ? q * p : 0;
-
-                                    const loadingProducts = isIngredients
-                                        ? loadingIngredientProducts
-                                        : isDecor
-                                            ? loadingDecorProducts
-                                            : loadingUtilityProducts;
-
-                                    const placeholder = isIngredients
-                                        ? "Masalliqni tanlang"
-                                        : isDecor
-                                            ? "Bezak mahsulotini tanlang"
-                                            : "Kommunal mahsulotni tanlang";
-
-                                    return (
-                                        <tr key={index}>
-                                            <td>{index + 1}</td>
-
-                                            <td>
-                                                <select
-                                                    className="input"
-                                                    value={row.product_id}
-                                                    onChange={(e) =>
-                                                        handleItemChange(
-                                                            index,
-                                                            "product_id",
-                                                            e.target.value
-                                                        )
-                                                    }
-                                                >
-                                                    <option value="">
-                                                        {loadingProducts
-                                                            ? "Yuklanmoqda..."
-                                                            : placeholder}
-                                                    </option>
-                                                    {productOptions.map((p) => (
-                                                        <option
-                                                            key={p.id}
-                                                            value={p.id}
-                                                        >
-                                                            {p.name}
-                                                        </option>
-                                                    ))}
-                                                </select>
-                                            </td>
-
-                                            {!isUtility && (
-                                                <td>
-                                                    <input
-                                                        className="input"
-                                                        type="number"
-                                                        min="0"
-                                                        step="0.01"
-                                                        value={row.quantity}
-                                                        onChange={(e) =>
-                                                            handleItemChange(
-                                                                index,
-                                                                "quantity",
-                                                                e.target.value
-                                                            )
-                                                        }
-                                                        placeholder="Miqdor"
-                                                    />
-                                                </td>
-                                            )}
-
-                                            {isIngredients && (
-                                                <td>
-                                                    <input
-                                                        className="input"
-                                                        type="number"
-                                                        min="0"
-                                                        step="1"
-                                                        value={row.unit_price}
-                                                        onChange={(e) =>
-                                                            handleItemChange(
-                                                                index,
-                                                                "unit_price",
-                                                                e.target.value
-                                                            )
-                                                        }
-                                                        placeholder="Birlik narxi"
-                                                    />
-                                                </td>
-                                            )}
-
-                                            {isIngredients ? (
-                                                <td>
-                                                    {total
-                                                        ? total.toLocaleString(
-                                                            "uz-UZ"
-                                                        ) + " so‘m"
-                                                        : "—"}
-                                                </td>
-                                            ) : (
-                                                <td>
-                                                    <input
-                                                        className="input"
-                                                        type="number"
-                                                        min="0"
-                                                        step="1"
-                                                        value={row.unit_price}
-                                                        onChange={(e) =>
-                                                            handleItemChange(
-                                                                index,
-                                                                "unit_price",
-                                                                e.target.value
-                                                            )
-                                                        }
-                                                        placeholder="Jami summa"
-                                                    />
-                                                </td>
-                                            )}
-
-                                            <td>
-                                                {items.length > 1 && (
-                                                    <button
-                                                        type="button"
-                                                        className="button-primary"
-                                                        style={{
-                                                            padding: "4px 8px",
-                                                            fontSize: 11,
-                                                            boxShadow: "none",
-                                                        }}
-                                                        onClick={() =>
-                                                            removeRow(index)
-                                                        }
-                                                    >
-                                                        O‘chirish
-                                                    </button>
-                                                )}
-                                            </td>
-                                        </tr>
-                                    );
-                                })}
-                            </tbody>
-                        </table>
-                    </div>
-
-                    <div
-                        style={{
-                            marginTop: 10,
-                            marginBottom: 8,
-                            display: "flex",
-                            justifyContent: "space-between",
-                            alignItems: "center",
-                            gap: 8,
-                        }}
-                    >
-                        <div style={{ fontSize: 14 }}>
-                            Umumiy summa (hisoblangan):{" "}
-                            <strong>
-                                {totalCalculated.toLocaleString("uz-UZ")} so‘m
-                            </strong>
-                        </div>
-
-                        <button
-                            type="button"
-                            className="button-primary"
-                            style={{ boxShadow: "none" }}
-                            onClick={addRow}
-                        >
-                            Qator qo‘shish
-                        </button>
-                    </div>
-
-                    <div
-                        style={{
-                            marginTop: 14,
-                            display: "flex",
-                            justifyContent: "flex-end",
-                            gap: 8,
-                        }}
-                    >
-                        <button
-                            className="button-primary"
-                            type="submit"
-                            disabled={saving}
-                        >
-                            {saving
-                                ? "Saqlanmoqda..."
-                                : editingId
-                                    ? "O‘zgartirishni saqlash"
-                                    : "Xarajatni saqlash"}
-                        </button>
-
-                        {editingId && (
-                            <button
-                                type="button"
-                                className="button-primary"
-                                style={{
-                                    background: "transparent",
-                                    border: "1px solid rgba(148,163,184,0.7)",
-                                    color: "#e5e7eb",
-                                    boxShadow: "none",
-                                }}
-                                onClick={handleCancelEdit}
-                            >
-                                Bekor qilish
-                            </button>
-                        )}
-                    </div>
-                </form>
-            </div>
+            <ExpensesForm
+                typeLabel={typeLabel}
+                currentTabInfo={currentTabInfo}
+                productLabel={productLabel}
+                items={items}
+                isIngredients={isIngredients}
+                isDecor={isDecor}
+                isUtility={isUtility}
+                ingredientProducts={ingredientProducts}
+                decorProducts={decorProducts}
+                utilityProducts={utilityProducts}
+                loadingIngredientProducts={loadingIngredientProducts}
+                loadingDecorProducts={loadingDecorProducts}
+                loadingUtilityProducts={loadingUtilityProducts}
+                totalCalculated={totalCalculated}
+                saving={saving}
+                editingId={editingId}
+                onSubmit={handleSubmit}
+                onCancelEdit={handleCancelEdit}
+                onAddRow={addRow}
+                onRemoveRow={removeRow}
+                onItemChange={handleItemChange}
+            />
 
             {/* RO'YXAT */}
-            <div className="card" style={{ marginTop: 16 }}>
-                <div
-                    style={{
-                        marginBottom: 8,
-                        display: "flex",
-                        justifyContent: "space-between",
-                        alignItems: "center",
-                    }}
-                >
-                    <div className="card-title" style={{ marginBottom: 0 }}>
-                        {typeLabel} bo‘yicha so‘nggi xarajatlar
-                    </div>
-                    <div style={{ fontSize: 13, opacity: 0.85 }}>
-                        Jami: <strong>{expenses.length}</strong> ta yozuv
-                    </div>
-                </div>
-
-                {loadingExpenses ? (
-                    <p>Yuklanmoqda...</p>
-                ) : expenses.length === 0 ? (
-                    <p>Hozircha bu bo‘lim bo‘yicha xarajatlar yo‘q.</p>
-                ) : (
-                    <div className="table-wrapper">
-                        <table className="table">
-                            <thead>
-                                <tr>
-                                    <th>SANA</th>
-                                    <th>NOMLAR</th>
-                                    <th>UMUMIY SUMMA</th>
-                                    <th style={{ width: 140 }}>AMALLAR</th>
-                                </tr>
-                            </thead>
-                            <tbody>
-                                {expenses.map((exp) => {
-                                    const itemsSummary =
-                                        Array.isArray(exp.items) &&
-                                            exp.items.length > 0
-                                            ? exp.items
-                                                .map(
-                                                    (it) =>
-                                                        it.name ||
-                                                        it.product_name ||
-                                                        ""
-                                                )
-                                                .filter(Boolean)
-                                                .join(", ")
-                                            : "-";
-
-                                    return (
-                                        <tr key={exp.id}>
-                                            <td>{exp.expense_date}</td>
-                                            <td>{itemsSummary}</td>
-                                            <td>
-                                                {typeof exp.total_amount ===
-                                                    "number"
-                                                    ? exp.total_amount.toLocaleString(
-                                                        "uz-UZ"
-                                                    )
-                                                    : "-"}
-                                            </td>
-                                            <td>
-                                                <div
-                                                    style={{
-                                                        display: "flex",
-                                                        gap: 6,
-                                                        justifyContent:
-                                                            "flex-start",
-                                                    }}
-                                                >
-                                                    <button
-                                                        type="button"
-                                                        className="button-primary"
-                                                        style={{
-                                                            padding: "3px 8px",
-                                                            fontSize: 11,
-                                                            boxShadow: "none",
-                                                        }}
-                                                        onClick={() =>
-                                                            handleEdit(exp)
-                                                        }
-                                                    >
-                                                        Edit
-                                                    </button>
-                                                    <button
-                                                        type="button"
-                                                        className="button-primary"
-                                                        style={{
-                                                            padding: "3px 8px",
-                                                            fontSize: 11,
-                                                            boxShadow: "none",
-                                                            background:
-                                                                "#dc2626",
-                                                        }}
-                                                        onClick={() =>
-                                                            handleDelete(exp)
-                                                        }
-                                                    >
-                                                        Delete
-                                                    </button>
-                                                </div>
-                                            </td>
-                                        </tr>
-                                    );
-                                })}
-                            </tbody>
-                        </table>
-                    </div>
-                )}
-            </div>
+            <ExpensesList
+                typeLabel={typeLabel}
+                expenses={expenses}
+                loading={loadingExpenses}
+                onEdit={handleEdit}
+                onDelete={handleDelete}
+            />
         </div>
     );
 }

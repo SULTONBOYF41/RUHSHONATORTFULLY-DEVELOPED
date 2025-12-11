@@ -1,20 +1,10 @@
+// client/src/pages/TransfersPage.jsx
 import { useEffect, useMemo, useState } from "react";
 import api from "../services/api";
 import { useAuth } from "../context/AuthContext";
 
-const STATUS_LABELS = {
-    PENDING: "Davom qilmoqda",
-    PARTIAL: "Qisman bajarildi",
-    COMPLETED: "To‘liq bajarildi",
-    CANCELLED: "Bekor qilingan",
-};
-
-const STATUS_COLORS = {
-    PENDING: "#f59e0b", // orange
-    PARTIAL: "#eab308", // yellow
-    COMPLETED: "#22c55e", // green
-    CANCELLED: "#ef4444", // red
-};
+import TransferForm from "../components/transfers/TransferForm";
+import TransfersTable from "../components/transfers/TransfersTable";
 
 function TransfersPage() {
     const { user } = useAuth();
@@ -45,6 +35,8 @@ function TransfersPage() {
     const [loadingTransfers, setLoadingTransfers] = useState(false);
     const [saving, setSaving] = useState(false);
     const [actionLoadingItemId, setActionLoadingItemId] = useState(null);
+    const [editLoading, setEditLoading] = useState(false);
+    const [editingId, setEditingId] = useState(null);
 
     const [error, setError] = useState("");
     const [success, setSuccess] = useState("");
@@ -64,7 +56,7 @@ function TransfersPage() {
         () =>
             (branches || []).filter(
                 (b) =>
-                    (b.type || "BRANCH").toUpperCase() === "BRANCH" &&
+                    (b.branch_type || "BRANCH").toUpperCase() === "BRANCH" &&
                     b.is_active !== 0
             ),
         [branches]
@@ -74,7 +66,7 @@ function TransfersPage() {
         () =>
             (branches || []).filter(
                 (b) =>
-                    (b.type || "BRANCH").toUpperCase() === "OUTLET" &&
+                    (b.branch_type || "BRANCH").toUpperCase() === "OUTLET" &&
                     b.is_active !== 0
             ),
         [branches]
@@ -126,9 +118,11 @@ function TransfersPage() {
         fetchBranches();
         fetchProducts();
         fetchTransfers();
+        // eslint-disable-next-line react-hooks/exhaustive-deps
     }, []);
 
     const resetForm = () => {
+        setEditingId(null);
         setToBranchId("");
         setNote("");
         setItems([{ product_id: "", quantity: "" }]);
@@ -188,20 +182,29 @@ function TransfersPage() {
 
         try {
             setSaving(true);
-            const res = await api.post("/transfers", payload);
-            const created = res.data;
+            if (editingId) {
+                const res = await api.put(`/transfers/${editingId}`, payload);
+                const updated = res.data;
+                setTransfers((prev) =>
+                    prev.map((t) => (t.id === updated.id ? updated : t))
+                );
+                setSuccess("Transfer muvaffaqiyatli tahrirlandi.");
+            } else {
+                const res = await api.post("/transfers", payload);
+                const created = res.data;
+                setTransfers((prev) => [created, ...prev]);
+                setSuccess(
+                    mode === "BRANCH"
+                        ? "Filialga transfer muvaffaqiyatli yaratildi."
+                        : "Do‘konga transfer muvaffaqiyatli yaratildi."
+                );
+            }
 
-            setTransfers((prev) => [created, ...prev]);
-            setSuccess(
-                mode === "BRANCH"
-                    ? "Filialga transfer muvaffaqiyatli yaratildi."
-                    : "Do‘konga transfer muvaffaqiyatli yaratildi."
-            );
             resetForm();
         } catch (err) {
             console.error(err);
             const msg =
-                err.response?.data?.message || "Transferni yaratishda xatolik.";
+                err.response?.data?.message || "Transferni saqlashda xatolik.";
             setError(msg);
         } finally {
             setSaving(false);
@@ -235,25 +238,6 @@ function TransfersPage() {
         selectedTransfer &&
         (selectedTransfer.to_branch_type || "BRANCH").toUpperCase() === "OUTLET";
 
-    const renderStatusBadge = (status) => {
-        const label = STATUS_LABELS[status] || status;
-        const bg = STATUS_COLORS[status] || "#6b7280";
-        return (
-            <span
-                style={{
-                    display: "inline-block",
-                    padding: "2px 8px",
-                    borderRadius: 999,
-                    fontSize: 12,
-                    background: bg,
-                    color: "#0b1120",
-                }}
-            >
-                {label}
-            </span>
-        );
-    };
-
     // Do'kon transferidagi itemni QABUL QILISH
     const handleAcceptItem = async (transfer, item) => {
         if (!transfer || !item) return;
@@ -273,7 +257,6 @@ function TransfersPage() {
                 }
             );
 
-            // yangilangan transferni olib, ro'yxatga qo'yamiz
             const res = await api.get(`/transfers/${transfer.id}`);
             const updated = res.data;
             setTransfers((prev) =>
@@ -329,6 +312,75 @@ function TransfersPage() {
         }
     };
 
+    // Transferni tahrirlash (faqat PENDING)
+    const loadTransferForEdit = async (t) => {
+        setError("");
+        setSuccess("");
+
+        setEditLoading(true);
+        try {
+            const res = await api.get(`/transfers/${t.id}`);
+            const data = res.data;
+
+            setEditingId(data.id);
+            setTransferDate(data.transfer_date);
+            setToBranchId(data.to_branch_id);
+            setNote(data.note || "");
+            setItems(
+                (data.items || []).map((it) => ({
+                    product_id: it.product_id,
+                    quantity: it.quantity,
+                }))
+            );
+
+            // Detal uchun open qilingan bo'lsa ham yaxshi, lekin formaga fokus beramiz
+            window.scrollTo({ top: 0, behavior: "smooth" });
+        } catch (err) {
+            console.error(err);
+            const msg =
+                err?.response?.data?.message ||
+                "Transferni tahrirlash uchun ma’lumotni yuklashda xatolik.";
+            setError(msg);
+        } finally {
+            setEditLoading(false);
+        }
+    };
+
+    const deleteTransfer = async (t) => {
+        if (
+            !window.confirm(
+                "Rostdan ham bu transferni bekor qilishni istaysizmi? (Faqat barcha bandlari PENDING bo‘lsa)"
+            )
+        ) {
+            return;
+        }
+
+        setError("");
+        setSuccess("");
+
+        try {
+            await api.delete(`/transfers/${t.id}`);
+
+            // status CANCELLED bo'ladi, lekin ro'yxatdan olib tashlaymiz
+            setTransfers((prev) => prev.filter((x) => x.id !== t.id));
+
+            if (editingId && Number(editingId) === Number(t.id)) {
+                resetForm();
+            }
+            if (selectedTransferId === t.id) {
+                setSelectedTransferId(null);
+            }
+
+            setSuccess("Transfer bekor qilindi.");
+        } catch (err) {
+            console.error(err);
+            const msg =
+                err?.response?.data?.message ||
+                "Transferni bekor qilishda xatolik.";
+            setError(msg);
+        }
+    };
+
     const pageTitle =
         mode === "BRANCH"
             ? "Filiallarga transferlar"
@@ -338,9 +390,6 @@ function TransfersPage() {
         mode === "BRANCH"
             ? "Markaziy ombordan filial omborlariga mahsulot va bezaklarni jo‘natish (filial o‘z sahifasida qabul qiladi)."
             : "Markaziy ombordan do‘kon va supermarketlarga jo‘natish va shu yerning o‘zida qabul qilish.";
-
-    const filterLabel =
-        mode === "BRANCH" ? "Filial:" : "Do‘kon:";
 
     return (
         <div className="page">
@@ -406,13 +455,6 @@ function TransfersPage() {
                             Do‘konlar
                         </button>
                     </div>
-
-                    <input
-                        className="input"
-                        type="date"
-                        value={transferDate}
-                        onChange={(e) => setTransferDate(e.target.value)}
-                    />
                 </div>
             </div>
 
@@ -422,375 +464,53 @@ function TransfersPage() {
                 </div>
             )}
             {success && (
-                <div className="info-box info-box--muted" style={{ marginBottom: 8 }}>
+                <div
+                    className="info-box info-box--success"
+                    style={{ marginBottom: 8 }}
+                >
                     {success}
                 </div>
             )}
 
-            {/* Transfer yaratish formasi */}
-            <div className="card">
-                <div className="card-title">
-                    {mode === "BRANCH"
-                        ? "Filialga yangi transfer yaratish"
-                        : "Do‘konga yangi transfer yaratish"}
-                </div>
+            <TransferForm
+                mode={mode}
+                transferDate={transferDate}
+                onTransferDateChange={setTransferDate}
+                destinationOptions={destinationOptions}
+                loadingBranches={loadingBranches}
+                loadingProducts={loadingProducts}
+                toBranchId={toBranchId}
+                onToBranchChange={setToBranchId}
+                items={items}
+                onItemChange={handleItemChange}
+                onAddRow={addRow}
+                onRemoveRow={removeRow}
+                note={note}
+                onNoteChange={setNote}
+                onSubmit={handleSubmit}
+                saving={saving || editLoading}
+                editingId={editingId}
+                onCancelEdit={resetForm}
+                productOptions={productOptions}
+            />
 
-                <form onSubmit={handleSubmit}>
-                    <div className="form-row">
-                        <div>
-                            <label>{mode === "BRANCH" ? "Filial" : "Do‘kon / supermarket"}</label>
-                            <select
-                                className="input"
-                                value={toBranchId}
-                                onChange={(e) => setToBranchId(e.target.value)}
-                                disabled={loadingBranches}
-                            >
-                                <option value="">
-                                    {mode === "BRANCH"
-                                        ? "Filial tanlang"
-                                        : "Do‘kon / supermarket tanlang"}
-                                </option>
-                                {destinationOptions.map((b) => (
-                                    <option key={b.id} value={b.id}>
-                                        {b.name} {b.code ? `(${b.code})` : ""}
-                                    </option>
-                                ))}
-                            </select>
-                        </div>
-                    </div>
-
-                    <div className="table-wrapper" style={{ marginTop: 10 }}>
-                        <table className="table">
-                            <thead>
-                                <tr>
-                                    <th style={{ width: "45%" }}>Mahsulot / bezak</th>
-                                    <th style={{ width: "25%" }}>Miqdor</th>
-                                    <th style={{ width: "10%" }} />
-                                </tr>
-                            </thead>
-                            <tbody>
-                                {items.map((row, index) => (
-                                    <tr key={index}>
-                                        <td>
-                                            <select
-                                                className="input"
-                                                value={row.product_id}
-                                                onChange={(e) =>
-                                                    handleItemChange(index, "product_id", e.target.value)
-                                                }
-                                                disabled={loadingProducts}
-                                            >
-                                                <option value="">Tanlang...</option>
-                                                {productOptions.map((p) => {
-                                                    const cat = String(p.category || "").toUpperCase();
-                                                    const isDecor = cat === "DECORATION";
-                                                    return (
-                                                        <option key={p.id} value={p.id}>
-                                                            {p.name}{" "}
-                                                            {p.unit === "kg" ? "(kg)" : "(dona)"}{" "}
-                                                            {isDecor ? "[dekor]" : ""}
-                                                        </option>
-                                                    );
-                                                })}
-                                            </select>
-                                        </td>
-                                        <td>
-                                            <input
-                                                className="input"
-                                                type="number"
-                                                min="0"
-                                                step="0.01"
-                                                value={row.quantity}
-                                                onChange={(e) =>
-                                                    handleItemChange(index, "quantity", e.target.value)
-                                                }
-                                                placeholder="Miqdor"
-                                            />
-                                        </td>
-                                        <td>
-                                            {items.length > 1 && (
-                                                <button
-                                                    type="button"
-                                                    className="button-primary"
-                                                    style={{
-                                                        padding: "4px 8px",
-                                                        fontSize: 11,
-                                                        boxShadow: "none",
-                                                    }}
-                                                    onClick={() => removeRow(index)}
-                                                >
-                                                    O‘chirish
-                                                </button>
-                                            )}
-                                        </td>
-                                    </tr>
-                                ))}
-                            </tbody>
-                        </table>
-                    </div>
-
-                    <div
-                        style={{
-                            marginTop: 10,
-                            marginBottom: 8,
-                            display: "flex",
-                            justifyContent: "space-between",
-                            alignItems: "center",
-                            gap: 8,
-                        }}
-                    >
-                        <div style={{ fontSize: 13, color: "#9ca3af" }}>
-                            Mahsulotlar va bezaklar ro‘yxatiga qatorlar qo‘shing va
-                            miqdorlarini kiriting.
-                        </div>
-                        <button
-                            type="button"
-                            className="button-primary"
-                            style={{ boxShadow: "none" }}
-                            onClick={addRow}
-                        >
-                            Qator qo‘shish
-                        </button>
-                    </div>
-
-                    <div style={{ marginTop: 8, marginBottom: 8 }}>
-                        <label>Eslatma (ixtiyoriy)</label>
-                        <textarea
-                            className="input"
-                            rows={2}
-                            value={note}
-                            onChange={(e) => setNote(e.target.value)}
-                            placeholder={
-                                mode === "BRANCH"
-                                    ? "Masalan: Xonqa filialiga ertalabki jo‘natma..."
-                                    : "Masalan: Korzinka Chilonzor savdo nuqtasiga jo‘natma..."
-                            }
-                        />
-                    </div>
-
-                    <div
-                        style={{
-                            marginTop: 14,
-                            display: "flex",
-                            justifyContent: "flex-end",
-                        }}
-                    >
-                        <button className="button-primary" type="submit" disabled={saving}>
-                            {saving ? "Saqlanmoqda..." : "Transfer yaratish"}
-                        </button>
-                    </div>
-                </form>
-            </div>
-
-            {/* Transferlar ro'yxati */}
-            <div className="card" style={{ marginTop: 16 }}>
-                <div
-                    className="card-title"
-                    style={{
-                        display: "flex",
-                        justifyContent: "space-between",
-                        alignItems: "center",
-                        gap: 8,
-                    }}
-                >
-                    <span>
-                        {mode === "BRANCH"
-                            ? "Filiallarga transferlar"
-                            : "Do‘konlarga transferlar"}
-                    </span>
-
-                    {/* Filial / do'kon bo‘yicha filter */}
-                    <div style={{ display: "flex", gap: 6, alignItems: "center" }}>
-                        <span style={{ fontSize: 13, color: "#9ca3af" }}>{filterLabel}</span>
-                        <select
-                            className="input"
-                            style={{ minWidth: 140 }}
-                            value={filterToId}
-                            onChange={(e) => setFilterToId(e.target.value)}
-                        >
-                            <option value="all">Barchasi</option>
-                            {destinationOptions.map((b) => (
-                                <option key={b.id} value={b.id}>
-                                    {b.name} {b.code ? `(${b.code})` : ""}
-                                </option>
-                            ))}
-                        </select>
-                    </div>
-                </div>
-
-                {loadingTransfers ? (
-                    <p>Yuklanmoqda...</p>
-                ) : filteredTransfers.length === 0 ? (
-                    <p>Tanlangan filtrlarga mos transfer topilmadi.</p>
-                ) : (
-                    <div className="table-wrapper">
-                        <table className="table">
-                            <thead>
-                                <tr>
-                                    <th>#</th>
-                                    <th>Sana</th>
-                                    <th>{mode === "BRANCH" ? "Filial" : "Do‘kon"}</th>
-                                    <th>Status</th>
-                                </tr>
-                            </thead>
-                            <tbody>
-                                {filteredTransfers.map((t, idx) => (
-                                    <tr
-                                        key={t.id}
-                                        onClick={() =>
-                                            setSelectedTransferId(
-                                                t.id === selectedTransferId ? null : t.id
-                                            )
-                                        }
-                                        style={{ cursor: "pointer" }}
-                                    >
-                                        <td>{idx + 1}</td>
-                                        <td>{t.transfer_date}</td>
-                                        <td>{t.to_branch_name || t.to_branch_id}</td>
-                                        <td>{renderStatusBadge(t.status)}</td>
-                                    </tr>
-                                ))}
-                            </tbody>
-                        </table>
-                    </div>
-                )}
-
-                {/* Detallar – tanlangan transfer ostida mahsulotlar holati */}
-                {selectedTransfer && (
-                    <div
-                        style={{
-                            marginTop: 12,
-                            paddingTop: 10,
-                            borderTop: "1px solid rgba(148,163,184,0.3)",
-                        }}
-                    >
-                        <div
-                            style={{
-                                marginBottom: 6,
-                                fontSize: 14,
-                                display: "flex",
-                                justifyContent: "space-between",
-                            }}
-                        >
-                            <span>
-                                Transfer ID: <strong>{selectedTransfer.id}</strong> –{" "}
-                                {STATUS_LABELS[selectedTransfer.status] ||
-                                    selectedTransfer.status}
-                            </span>
-                            <span style={{ fontSize: 13, color: "#9ca3af" }}>
-                                {selectedTransfer.note || ""}
-                            </span>
-                        </div>
-
-                        <div className="table-wrapper">
-                            <table className="table">
-                                <thead>
-                                    <tr>
-                                        <th>#</th>
-                                        <th>Mahsulot / bezak</th>
-                                        <th>Miqdor</th>
-                                        <th>Status</th>
-                                        {selectedIsOutlet && (
-                                            <th style={{ width: 220 }}>Amal</th>
-                                        )}
-                                    </tr>
-                                </thead>
-                                <tbody>
-                                    {(selectedTransfer.items || []).map((it, idx) => (
-                                        <tr key={it.id}>
-                                            <td>{idx + 1}</td>
-                                            <td>{it.product_name}</td>
-                                            <td>
-                                                {it.quantity}{" "}
-                                                {it.product_unit === "kg" ? "kg" : "dona"}
-                                            </td>
-                                            <td>
-                                                {it.status === "PENDING" && (
-                                                    <span
-                                                        style={{ fontSize: 13, color: "#facc15" }}
-                                                    >
-                                                        Kutilmoqda
-                                                    </span>
-                                                )}
-                                                {it.status === "ACCEPTED" && (
-                                                    <span
-                                                        style={{ fontSize: 13, color: "#22c55e" }}
-                                                    >
-                                                        Qabul qilingan
-                                                    </span>
-                                                )}
-                                                {it.status === "REJECTED" && (
-                                                    <span
-                                                        style={{ fontSize: 13, color: "#f97316" }}
-                                                    >
-                                                        Bekor qilingan (markaziyga qaytdi)
-                                                    </span>
-                                                )}
-                                            </td>
-
-                                            {/* faqat DO'KON transferlarida shu yerda qabul/ bekor qilish */}
-                                            {selectedIsOutlet && (
-                                                <td>
-                                                    {it.status === "PENDING" ? (
-                                                        <div
-                                                            style={{
-                                                                display: "flex",
-                                                                gap: 6,
-                                                                justifyContent: "flex-start",
-                                                            }}
-                                                        >
-                                                            <button
-                                                                type="button"
-                                                                className="button-primary"
-                                                                style={{
-                                                                    padding: "3px 8px",
-                                                                    fontSize: 11,
-                                                                    boxShadow: "none",
-                                                                    backgroundColor: "#22c55e",
-                                                                }}
-                                                                disabled={actionLoadingItemId === it.id}
-                                                                onClick={() =>
-                                                                    handleAcceptItem(selectedTransfer, it)
-                                                                }
-                                                            >
-                                                                {actionLoadingItemId === it.id
-                                                                    ? "..."
-                                                                    : "Qabul qilish"}
-                                                            </button>
-                                                            <button
-                                                                type="button"
-                                                                className="button-primary"
-                                                                style={{
-                                                                    padding: "3px 8px",
-                                                                    fontSize: 11,
-                                                                    boxShadow: "none",
-                                                                    backgroundColor: "#f97316",
-                                                                }}
-                                                                disabled={actionLoadingItemId === it.id}
-                                                                onClick={() =>
-                                                                    handleRejectItem(selectedTransfer, it)
-                                                                }
-                                                            >
-                                                                {actionLoadingItemId === it.id
-                                                                    ? "..."
-                                                                    : "Bekor qilish"}
-                                                            </button>
-                                                        </div>
-                                                    ) : (
-                                                        <span style={{ fontSize: 12, opacity: 0.7 }}>
-                                                            —
-                                                        </span>
-                                                    )}
-                                                </td>
-                                            )}
-                                        </tr>
-                                    ))}
-                                </tbody>
-                            </table>
-                        </div>
-                    </div>
-                )}
-            </div>
+            <TransfersTable
+                mode={mode}
+                destinationOptions={destinationOptions}
+                filterToId={filterToId}
+                onFilterToIdChange={setFilterToId}
+                loadingTransfers={loadingTransfers}
+                filteredTransfers={filteredTransfers}
+                selectedTransfer={selectedTransfer}
+                selectedTransferId={selectedTransferId}
+                onSelectTransferId={setSelectedTransferId}
+                selectedIsOutlet={selectedIsOutlet}
+                onAcceptItem={handleAcceptItem}
+                onRejectItem={handleRejectItem}
+                actionLoadingItemId={actionLoadingItemId}
+                onEditTransfer={loadTransferForEdit}
+                onDeleteTransfer={deleteTransfer}
+            />
         </div>
     );
 }

@@ -1,12 +1,10 @@
+// client/src/pages/WarehousePage.jsx
 import React, { useEffect, useMemo, useState } from "react";
 import api from "../services/api";
 import { useAuth } from "../context/AuthContext";
 
-function getStatus(qty) {
-    if (qty <= 0) return { label: "Tugagan", type: "danger" };
-    if (qty <= 3) return { label: "Kam qoldi", type: "warning" };
-    return { label: "Yaxshi", type: "success" };
-}
+import WarehouseFilters from "../components/warehouse/WarehouseFilters";
+import WarehouseTable from "../components/warehouse/WarehouseTable";
 
 function WarehousePage() {
     const { user } = useAuth();
@@ -28,7 +26,7 @@ function WarehousePage() {
             const params = {};
 
             if (isBranch && user?.branch_id) {
-                // filial user - faqat o'z filialini ko'radi
+                // filial / do'kon user – faqat o'z joyini ko'radi
                 params.branch_id = user.branch_id;
             } else if (isAdmin && branchFilter !== "all") {
                 // admin: 'central' yoki aniq filial id
@@ -50,34 +48,38 @@ function WarehousePage() {
         // eslint-disable-next-line react-hooks/exhaustive-deps
     }, [branchFilter, isBranch, user?.branch_id]);
 
-    // Filiallar ro'yxati faqat admin uchun
+    // 🔹 Admin uchun filiallar dropdown – OUTLET larni ko‘rsatmaymiz
     const branches = useMemo(() => {
         if (!isAdmin) return [];
 
         const map = new Map();
 
         stock.forEach((item) => {
+            const type = String(item.branch_type || "BRANCH").toUpperCase();
+            if (type === "OUTLET") return; // do‘konlarni umuman ko‘rsatmaymiz
+
             const id = item.branch_id ?? "central";
             const name = item.branch_name || "Markaziy ombor";
+
             if (!map.has(id)) {
-                map.set(id, name);
+                map.set(id, { name, type });
             }
         });
 
-        const result = [
-            { id: "all", name: "Barchasi" },
-            { id: "central", name: "Markaziy ombor" },
-        ];
+        const result = [{ id: "all", name: "Barchasi" }];
 
-        for (const [id, name] of map.entries()) {
-            if (id === "central") continue; // yuqorida qo'shib bo'ldik
-            result.push({ id, name });
+        // Markaziy omborni alohida doimiy qo‘shamiz
+        result.push({ id: "central", name: "Markaziy ombor" });
+
+        for (const [id, info] of map.entries()) {
+            if (id === "central") continue;
+            result.push({ id, name: info.name });
         }
 
         return result;
     }, [stock, isAdmin]);
 
-    // Mahsulotlar dropdown ro'yxati
+    // Mahsulotlar dropdown ro‘yхati
     const products = useMemo(() => {
         const map = new Map();
 
@@ -88,7 +90,6 @@ function WarehousePage() {
         });
 
         const result = [{ id: "all", name: "Barchasi" }];
-
         for (const [id, name] of map.entries()) {
             result.push({ id, name });
         }
@@ -96,8 +97,12 @@ function WarehousePage() {
         return result;
     }, [stock]);
 
+    // 🔹 Jadvalda OUTLET qoldiqlarini umuman ko‘rsatmaymiz
     const filteredStocks = useMemo(() => {
-        return stock.filter((item) => {
+        return (stock || []).filter((item) => {
+            const type = String(item.branch_type || "BRANCH").toUpperCase();
+            if (type === "OUTLET") return false; // do‘konlar ombori chiqmasin
+
             const byProduct =
                 productFilter === "all" ||
                 String(item.product_id) === String(productFilter);
@@ -107,8 +112,8 @@ function WarehousePage() {
     }, [stock, productFilter]);
 
     const title =
-        isBranch && user?.branch_id
-            ? `Omborxona (${user.branch_name || "Filial"})`
+        isBranch && user?.branch_name
+            ? `Omborxona (${user.branch_name})`
             : "Omborxona";
 
     return (
@@ -121,37 +126,18 @@ function WarehousePage() {
                     </p>
                 </div>
 
-                <div className="page-header-actions">
-                    {isAdmin && (
-                        <select
-                            className="input"
-                            value={branchFilter}
-                            onChange={(e) => {
-                                setBranchFilter(e.target.value);
-                                // filial o'zgarsa mahsulot filterini reset qilamiz
-                                setProductFilter("all");
-                            }}
-                        >
-                            {branches.map((b) => (
-                                <option key={b.id} value={b.id}>
-                                    {b.name}
-                                </option>
-                            ))}
-                        </select>
-                    )}
-
-                    <select
-                        className="input"
-                        value={productFilter}
-                        onChange={(e) => setProductFilter(e.target.value)}
-                    >
-                        {products.map((p) => (
-                            <option key={p.id} value={p.id}>
-                                {p.name}
-                            </option>
-                        ))}
-                    </select>
-                </div>
+                <WarehouseFilters
+                    isAdmin={isAdmin}
+                    branches={branches}
+                    branchFilter={branchFilter}
+                    onBranchFilterChange={(val) => {
+                        setBranchFilter(val);
+                        setProductFilter("all"); // filial o‘zgarsa – mahsulot filtri reset
+                    }}
+                    products={products}
+                    productFilter={productFilter}
+                    onProductFilterChange={setProductFilter}
+                />
             </div>
 
             {error && (
@@ -160,53 +146,7 @@ function WarehousePage() {
                 </div>
             )}
 
-            <div className="card">
-                {loading && <p>Yuklanmoqda...</p>}
-
-                <div className="table-wrapper">
-                    <table className="table">
-                        <thead>
-                            <tr>
-                                <th>#</th>
-                                <th>Mahsulot</th>
-                                <th>Filial / Ombor</th>
-                                <th>Miqdor</th>
-                                <th>O‘lchov birligi</th>
-                                <th>Holati</th>
-                            </tr>
-                        </thead>
-                        <tbody>
-                            {filteredStocks.length === 0 ? (
-                                <tr>
-                                    <td colSpan="6" style={{ textAlign: "center" }}>
-                                        Hech narsa topilmadi.
-                                    </td>
-                                </tr>
-                            ) : (
-                                filteredStocks.map((item, index) => {
-                                    const status = getStatus(item.quantity);
-                                    return (
-                                        <tr
-                                            key={`${item.product_id}-${item.branch_id || "central"}`}
-                                        >
-                                            <td>{index + 1}</td>
-                                            <td>{item.product_name}</td>
-                                            <td>{item.branch_name || "Markaziy ombor"}</td>
-                                            <td>{item.quantity}</td>
-                                            <td>{item.unit}</td>
-                                            <td>
-                                                <span className={`badge badge-${status.type}`}>
-                                                    {status.label}
-                                                </span>
-                                            </td>
-                                        </tr>
-                                    );
-                                })
-                            )}
-                        </tbody>
-                    </table>
-                </div>
-            </div>
+            <WarehouseTable loading={loading} stocks={filteredStocks} />
         </div>
     );
 }

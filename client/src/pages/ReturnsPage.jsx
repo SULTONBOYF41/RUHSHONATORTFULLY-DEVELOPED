@@ -1,43 +1,32 @@
 // client/src/pages/ReturnsPage.jsx
-import React, { useEffect, useState } from "react";
+import React, { useEffect, useMemo, useState } from "react";
+import { useSearchParams } from "react-router-dom";
 import api from "../services/api";
 import { useAuth } from "../context/AuthContext";
 
-function statusBadgeClass(status) {
-    switch (status) {
-        case "PENDING":
-            return "badge-warning";
-        case "APPROVED":
-            return "badge-success";
-        case "CANCELED":
-            return "badge-danger";
-        default:
-            return "badge-secondary";
-    }
-}
-
-function statusLabel(status) {
-    switch (status) {
-        case "PENDING":
-            return "Kutilmoqda";
-        case "APPROVED":
-            return "Qabul qilingan";
-        case "CANCELED":
-            return "Bekor qilingan";
-        default:
-            return status || "—";
-    }
-}
+// Componentlar
+import BranchReturnForm from "../components/returns/BranchReturnForm";
+import OutletReturnForm from "../components/returns/OutletReturnForm";
+import ReturnsTable from "../components/returns/ReturnsTable";
+import ReturnDetailDrawer from "../components/returns/ReturnDetailDrawer";
 
 function ReturnsPage() {
     const { user } = useAuth();
+    const [searchParams] = useSearchParams();
+
     const isAdmin = user?.role === "admin";
     const isBranch = user?.role === "branch";
+
+    // URL'dan /returns?edit=ID kelgan bo'lsa
+    const initialEditId = searchParams.get("edit");
+
+    // Admin rejimi: BRANCH (filial) / OUTLET (do‘kon)
+    const [mode, setMode] = useState("BRANCH");
 
     const [branches, setBranches] = useState([]);
     const [products, setProducts] = useState([]);
 
-    // Forma (branch uchun)
+    // --- Filial formasi (branch) ---
     const [date, setDate] = useState(() =>
         new Date().toISOString().slice(0, 10)
     );
@@ -45,26 +34,82 @@ function ReturnsPage() {
     const [items, setItems] = useState([
         { product_id: "", quantity: "", unit: "", reason: "" },
     ]);
+    const [saving, setSaving] = useState(false);
+    const [editingId, setEditingId] = useState(null);
+    const [editLoading, setEditLoading] = useState(false);
 
-    // Ro'yxat
+    // --- Outlet formasi (admin) ---
+    const [outletDate, setOutletDate] = useState(() =>
+        new Date().toISOString().slice(0, 10)
+    );
+    const [outletBranchId, setOutletBranchId] = useState("");
+    const [outletComment, setOutletComment] = useState("");
+    const [outletItems, setOutletItems] = useState([
+        { product_id: "", quantity: "", unit: "", reason: "" },
+    ]);
+    const [outletSaving, setOutletSaving] = useState(false);
+
+    // Ro'yxat + filterlar
     const [list, setList] = useState([]);
     const [loadingList, setLoadingList] = useState(false);
-    const [saving, setSaving] = useState(false);
 
-    const [error, setError] = useState("");
-    const [success, setSuccess] = useState("");
-
-    // Admin filterlari
     const [branchFilter, setBranchFilter] = useState("all");
     const [statusFilter, setStatusFilter] = useState("PENDING");
     const [dateFrom, setDateFrom] = useState("");
     const [dateTo, setDateTo] = useState("");
 
-    // Detal (admin uchun)
+    // Detal (drawer)
     const [selectedReturn, setSelectedReturn] = useState(null);
     const [loadingDetail, setLoadingDetail] = useState(false);
     const [approving, setApproving] = useState(false);
     const [itemActionLoading, setItemActionLoading] = useState(false);
+
+    // Xabarlar
+    const [error, setError] = useState("");
+    const [success, setSuccess] = useState("");
+
+    // *** Faqat PRODUCT / DECORATION mahsulotlari ***
+    const productOptions = useMemo(
+        () =>
+            (products || []).filter((p) => {
+                const cat = String(p.category || "").toUpperCase();
+                return cat === "PRODUCT" || cat === "DECORATION";
+            }),
+        [products]
+    );
+
+    // Filial / do'kon options
+    const branchOptions = useMemo(
+        () =>
+            (branches || []).filter(
+                (b) =>
+                    b.is_active !== 0 &&
+                    String(b.branch_type || "BRANCH").toUpperCase() === "BRANCH"
+            ),
+        [branches]
+    );
+
+    const outletOptions = useMemo(
+        () =>
+            (branches || []).filter(
+                (b) =>
+                    b.is_active !== 0 &&
+                    String(b.branch_type || "BRANCH").toUpperCase() === "OUTLET"
+            ),
+        [branches]
+    );
+
+    // Admin vazvratlar ro'yxati: BRANCH / OUTLET bo'yicha filter
+    const visibleList = useMemo(() => {
+        if (!isAdmin) return list || [];
+        const targetType = mode === "OUTLET" ? "OUTLET" : "BRANCH";
+        return (list || []).filter((row) => {
+            const bt = String(row.branch_type || "BRANCH").toUpperCase();
+            return bt === targetType;
+        });
+    }, [list, mode, isAdmin]);
+
+    // --- API chaqiruvlar ---
 
     const loadBranches = async () => {
         if (!isAdmin) return;
@@ -94,8 +139,7 @@ function ReturnsPage() {
 
             if (isAdmin) {
                 if (branchFilter !== "all") params.branch_id = branchFilter;
-                if (statusFilter && statusFilter !== "all")
-                    params.status = statusFilter;
+                if (statusFilter && statusFilter !== "all") params.status = statusFilter;
                 if (dateFrom) params.date_from = dateFrom;
                 if (dateTo) params.date_to = dateTo;
             }
@@ -110,6 +154,8 @@ function ReturnsPage() {
         }
     };
 
+    // --- Hooks ---
+
     useEffect(() => {
         loadProducts();
         loadBranches();
@@ -120,13 +166,23 @@ function ReturnsPage() {
         // eslint-disable-next-line react-hooks/exhaustive-deps
     }, [branchFilter, statusFilter, dateFrom, dateTo]);
 
+    // History'dan /returns?edit=ID bilan kelganda
+    useEffect(() => {
+        if (initialEditId && isBranch) {
+            loadReturnForEdit(initialEditId);
+        }
+        // eslint-disable-next-line react-hooks/exhaustive-deps
+    }, [initialEditId, isBranch]);
+
+    // --- Branch form helpers ---
+
     const handleItemChange = (index, field, value) => {
         setItems((prev) => {
             const copy = [...prev];
             const row = { ...copy[index], [field]: value };
 
             if (field === "product_id") {
-                const product = products.find(
+                const product = productOptions.find(
                     (p) => String(p.id) === String(value)
                 );
                 row.unit = product?.unit || "";
@@ -148,17 +204,59 @@ function ReturnsPage() {
         setItems((prev) => prev.filter((_, i) => i !== index));
     };
 
-    const handleSubmit = async (e) => {
+    const resetBranchForm = () => {
+        setEditingId(null);
+        setDate(new Date().toISOString().slice(0, 10));
+        setComment("");
+        setItems([{ product_id: "", quantity: "", unit: "", reason: "" }]);
+    };
+
+    const loadReturnForEdit = async (id) => {
+        if (!isBranch && !isAdmin) return;
+
+        setError("");
+        setSuccess("");
+        setEditLoading(true);
+
+        try {
+            const res = await api.get(`/returns/${id}`);
+            const data = res.data;
+
+            setEditingId(data.header.id);
+            setDate(data.header.return_date);
+            setComment(data.header.comment || "");
+            setItems(
+                (data.items || []).map((it) => ({
+                    product_id: it.product_id,
+                    quantity: it.quantity,
+                    unit: it.unit || "",
+                    reason: it.reason || "",
+                }))
+            );
+
+            window.scrollTo({ top: 0, behavior: "smooth" });
+        } catch (err) {
+            console.error(err);
+            const msg =
+                err?.response?.data?.message ||
+                "Vazvratni tahrirlash uchun ma’lumotni yuklashda xatolik.";
+            setError(msg);
+        } finally {
+            setEditLoading(false);
+        }
+    };
+
+    const handleBranchSubmit = async (e) => {
         e.preventDefault();
         setError("");
         setSuccess("");
 
-        if (!isBranch) {
-            setError("Vazvratni faqat filial xodimi kiritadi.");
+        if (!isBranch && !isAdmin) {
+            setError("Vazvratni faqat filial xodimi yoki admin kiritadi.");
             return;
         }
 
-        if (!user?.branch_id) {
+        if (!user?.branch_id && !isAdmin) {
             setError(
                 "Profilga filial biriktirilmagan. Iltimos, admin bilan bog‘laning."
             );
@@ -193,25 +291,161 @@ function ReturnsPage() {
                 date,
                 comment: comment || "",
                 items: preparedItems,
-                branch_id: user.branch_id || null,
+                branch_id: isAdmin ? null : (user.branch_id || null),
             };
 
-            await api.post("/returns", payload);
+            if (editingId) {
+                await api.put(`/returns/${editingId}`, payload);
+                setSuccess("Vazvrat muvaffaqiyatli tahrirlandi.");
+            } else {
+                await api.post("/returns", payload);
+                setSuccess("Vazvrat so‘rovi yuborildi. Admin tasdiqlashi kerak.");
+            }
 
-            setSuccess("Vazvrat so‘rovi yuborildi. Admin tasdiqlashi kerak.");
-            setItems([{ product_id: "", quantity: "", unit: "", reason: "" }]);
-            setComment("");
+            resetBranchForm();
             await loadReturns();
         } catch (err) {
             console.error(err);
             const msg =
-                err?.response?.data?.message ||
-                "Vazvratni saqlashda xatolik.";
+                err?.response?.data?.message || "Vazvratni saqlashda xatolik.";
             setError(msg);
         } finally {
             setSaving(false);
         }
     };
+
+    const deleteReturn = async (row) => {
+        if (
+            !window.confirm(
+                "Rostdan ham bu vazvratni o‘chirishni istaysizmi? (Faqat PENDING holatda)"
+            )
+        ) {
+            return;
+        }
+
+        setError("");
+        setSuccess("");
+
+        try {
+            await api.delete(`/returns/${row.id}`);
+
+            if (editingId && Number(editingId) === Number(row.id)) {
+                resetBranchForm();
+            }
+
+            await loadReturns();
+            setSuccess("Vazvrat o‘chirildi.");
+        } catch (err) {
+            console.error(err);
+            const msg =
+                err?.response?.data?.message ||
+                "Vazvratni o‘chirishda xatolik.";
+            setError(msg);
+        }
+    };
+
+    // --- Outlet form handlers ---
+
+    const handleOutletItemChange = (index, field, value) => {
+        setOutletItems((prev) => {
+            const copy = [...prev];
+            const row = { ...copy[index], [field]: value };
+
+            if (field === "product_id") {
+                const product = productOptions.find(
+                    (p) => String(p.id) === String(value)
+                );
+                row.unit = product?.unit || "";
+            }
+
+            copy[index] = row;
+            return copy;
+        });
+    };
+
+    const addOutletRow = () => {
+        setOutletItems((prev) => [
+            ...prev,
+            { product_id: "", quantity: "", unit: "", reason: "" },
+        ]);
+    };
+
+    const removeOutletRow = (index) => {
+        setOutletItems((prev) => prev.filter((_, i) => i !== index));
+    };
+
+    const handleOutletSubmit = async (e) => {
+        e.preventDefault();
+        setError("");
+        setSuccess("");
+
+        if (!isAdmin) {
+            setError("Bu bo‘lim faqat admin uchun.");
+            return;
+        }
+
+        if (!outletBranchId) {
+            setError("Do‘kon / supermarketni tanlang.");
+            return;
+        }
+
+        if (outletItems.length === 0) {
+            setError("Kamida bitta mahsulot kiriting.");
+            return;
+        }
+
+        const preparedItems = [];
+        for (const it of outletItems) {
+            if (!it.product_id || !it.quantity) continue;
+            preparedItems.push({
+                product_id: Number(it.product_id),
+                quantity: Number(it.quantity),
+                unit: it.unit || "",
+                reason: it.reason || "",
+            });
+        }
+
+        if (preparedItems.length === 0) {
+            setError("Kamida bitta to‘liq mahsulot qatori kiriting.");
+            return;
+        }
+
+        try {
+            setOutletSaving(true);
+
+            const payload = {
+                date: outletDate,
+                comment: outletComment || "",
+                items: preparedItems,
+                branch_id: Number(outletBranchId),
+            };
+
+            const res = await api.post("/returns", payload);
+            const created = res.data;
+
+            await api.post(`/returns/${created.id}/approve`);
+            setStatusFilter("all");
+
+            setSuccess("Do‘kondan vazvrat kiritildi va qabul qilindi.");
+            setOutletItems([
+                { product_id: "", quantity: "", unit: "", reason: "" },
+            ]);
+            setOutletComment("");
+            setOutletBranchId("");
+            setOutletDate(new Date().toISOString().slice(0, 10));
+            await loadReturns();
+        } catch (err) {
+            console.error(err);
+            const msg =
+                err?.response?.data?.message ||
+                "Do‘kon vazvratini saqlashda yoki tasdiqlashda xatolik.";
+            setError(msg);
+        } finally {
+            setOutletSaving(false);
+        }
+    };
+
+    // --- Drawer / approve/cancel ---
 
     const openDetail = async (row) => {
         if (!isAdmin) return;
@@ -303,8 +537,12 @@ function ReturnsPage() {
         }
     };
 
+    // --- UI ---
+
     const pageTitle = isAdmin
-        ? "Vazvratlar (filiallardan kelayotgan qaytishlar)"
+        ? mode === "BRANCH"
+            ? "Vazvratlar – filiallardan kelgan qaytishlar"
+            : "Vazvratlar – do‘kon / supermarketlardan qaytish"
         : "Vazvratlar (markaziy omborga qaytarish)";
 
     return (
@@ -313,26 +551,85 @@ function ReturnsPage() {
                 <div>
                     <h1 className="page-title">{pageTitle}</h1>
                     <p className="page-subtitle">
-                        Transfer: markaziy ombordan filiallarga jo‘natish. <br />
-                        Vazvrat: filiallardan markaziy omborga qaytarish.
+                        Transfer: markaziy ombordan filiallarga va do‘konlarga jo‘natish. <br />
+                        Vazvrat: filiallar yoki do‘konlardan markaziy omborga qaytarish.
                     </p>
                 </div>
 
                 {isAdmin && (
                     <div className="page-header-actions" style={{ gap: 8 }}>
+                        {/* Rejim tanlash: Filial / Do‘kon */}
+                        <div
+                            style={{
+                                display: "inline-flex",
+                                borderRadius: 999,
+                                padding: 2,
+                                background: "rgba(15,23,42,0.8)",
+                                border: "1px solid rgba(148,163,184,0.6)",
+                            }}
+                        >
+                            <button
+                                type="button"
+                                onClick={() => {
+                                    setMode("BRANCH");
+                                    setBranchFilter("all");
+                                    setStatusFilter("PENDING");
+                                    setSelectedReturn(null);
+                                    setError("");
+                                    setSuccess("");
+                                }}
+                                style={{
+                                    border: "none",
+                                    padding: "4px 12px",
+                                    fontSize: 12,
+                                    borderRadius: 999,
+                                    cursor: "pointer",
+                                    backgroundColor:
+                                        mode === "BRANCH" ? "#e5e7eb" : "transparent",
+                                    color: mode === "BRANCH" ? "#0b1120" : "#e5e7eb",
+                                }}
+                            >
+                                Filial vazvratlari
+                            </button>
+                            <button
+                                type="button"
+                                onClick={() => {
+                                    setMode("OUTLET");
+                                    setBranchFilter("all");
+                                    setStatusFilter("all");
+                                    setSelectedReturn(null);
+                                    setError("");
+                                    setSuccess("");
+                                }}
+                                style={{
+                                    border: "none",
+                                    padding: "4px 12px",
+                                    fontSize: 12,
+                                    borderRadius: 999,
+                                    cursor: "pointer",
+                                    backgroundColor:
+                                        mode === "OUTLET" ? "#e5e7eb" : "transparent",
+                                    color: mode === "OUTLET" ? "#0b1120" : "#e5e7eb",
+                                }}
+                            >
+                                Do‘kon vazvratlari
+                            </button>
+                        </div>
+
+                        {/* Filterlar */}
                         <select
                             className="input"
                             value={branchFilter}
                             onChange={(e) => setBranchFilter(e.target.value)}
                         >
-                            <option value="all">Barcha filiallar</option>
-                            {branches
-                                .filter((b) => b.is_active !== 0)
-                                .map((b) => (
-                                    <option key={b.id} value={b.id}>
-                                        {b.name}
-                                    </option>
-                                ))}
+                            <option value="all">
+                                {mode === "BRANCH" ? "Barcha filiallar" : "Barcha do‘konlar"}
+                            </option>
+                            {(mode === "BRANCH" ? branchOptions : outletOptions).map((b) => (
+                                <option key={b.id} value={b.id}>
+                                    {b.name}
+                                </option>
+                            ))}
                         </select>
 
                         <select
@@ -377,371 +674,71 @@ function ReturnsPage() {
                 </div>
             )}
 
-            {/* Filial uchun forma */}
-            {isBranch && (
-                <div className="card" style={{ marginBottom: 16 }}>
-                    <div className="card-header">
-                        <div>
-                            <div className="card-title">Yangi vazvrat kiritish</div>
-                            <div className="card-subtitle">
-                                {user?.branch_name || "Filial"} ➜ Markaziy ombor
-                            </div>
-                        </div>
-                    </div>
+            {/* Filial formasi */}
+            <BranchReturnForm
+                isBranch={isBranch}
+                branchName={user?.branch_name}
+                editingId={editingId}
+                editLoading={editLoading}
+                saving={saving}
+                date={date}
+                comment={comment}
+                items={items}
+                productOptions={productOptions}
+                onDateChange={setDate}
+                onCommentChange={setComment}
+                onItemChange={handleItemChange}
+                onAddRow={addRow}
+                onRemoveRow={removeRow}
+                onSubmit={handleBranchSubmit}
+                onCancelEdit={resetBranchForm}
+            />
 
-                    <form onSubmit={handleSubmit}>
-                        <div className="form-grid">
-                            <div className="form-group">
-                                <label className="form-label">Sana</label>
-                                <input
-                                    className="input"
-                                    type="date"
-                                    value={date}
-                                    onChange={(e) => setDate(e.target.value)}
-                                />
-                            </div>
+            {/* Outlet formasi (admin + OUTLET rejimi) */}
+            <OutletReturnForm
+                visible={isAdmin && mode === "OUTLET"}
+                outletDate={outletDate}
+                outletBranchId={outletBranchId}
+                outletComment={outletComment}
+                outletItems={outletItems}
+                outletOptions={outletOptions}
+                productOptions={productOptions}
+                outletSaving={outletSaving}
+                onOutletDateChange={setOutletDate}
+                onOutletBranchChange={setOutletBranchId}
+                onOutletCommentChange={setOutletComment}
+                onOutletItemChange={handleOutletItemChange}
+                onAddOutletRow={addOutletRow}
+                onRemoveOutletRow={removeOutletRow}
+                onOutletSubmit={handleOutletSubmit}
+            />
 
-                            <div className="form-group">
-                                <label className="form-label">Izoh (ixtiyoriy)</label>
-                                <input
-                                    className="input"
-                                    type="text"
-                                    value={comment}
-                                    onChange={(e) => setComment(e.target.value)}
-                                    placeholder="Masalan: yaroqlilik muddati, noto‘g‘ri kelgan mahsulot..."
-                                />
-                            </div>
-                        </div>
+            {/* Ro'yxat */}
+            <ReturnsTable
+                isAdmin={isAdmin}
+                mode={mode}
+                visibleList={visibleList}
+                loadingList={loadingList}
+                isBranch={isBranch}
+                saving={saving}
+                outletSaving={outletSaving}
+                onOpenDetail={openDetail}
+                onEditRow={(row) => loadReturnForEdit(row.id)}
+                onDeleteRow={deleteReturn}
+            />
 
-                        <div className="table-wrapper" style={{ marginTop: 16 }}>
-                            <table className="table">
-                                <thead>
-                                    <tr>
-                                        <th>#</th>
-                                        <th>Mahsulot</th>
-                                        <th>Miqdor</th>
-                                        <th>O‘lchov</th>
-                                        <th>Sabab / Izoh</th>
-                                        <th />
-                                    </tr>
-                                </thead>
-                                <tbody>
-                                    {items.map((row, index) => (
-                                        <tr key={index}>
-                                            <td>{index + 1}</td>
-                                            <td>
-                                                <select
-                                                    className="input"
-                                                    value={row.product_id}
-                                                    onChange={(e) =>
-                                                        handleItemChange(
-                                                            index,
-                                                            "product_id",
-                                                            e.target.value
-                                                        )
-                                                    }
-                                                >
-                                                    <option value="">Tanlang...</option>
-                                                    {products.map((p) => (
-                                                        <option key={p.id} value={p.id}>
-                                                            {p.name}
-                                                        </option>
-                                                    ))}
-                                                </select>
-                                            </td>
-                                            <td>
-                                                <input
-                                                    className="input"
-                                                    type="number"
-                                                    min="0"
-                                                    step="0.01"
-                                                    value={row.quantity}
-                                                    onChange={(e) =>
-                                                        handleItemChange(
-                                                            index,
-                                                            "quantity",
-                                                            e.target.value
-                                                        )
-                                                    }
-                                                />
-                                            </td>
-                                            <td>
-                                                <input
-                                                    className="input"
-                                                    type="text"
-                                                    value={row.unit}
-                                                    onChange={(e) =>
-                                                        handleItemChange(index, "unit", e.target.value)
-                                                    }
-                                                    placeholder="kg / dona ..."
-                                                />
-                                            </td>
-                                            <td>
-                                                <input
-                                                    className="input"
-                                                    type="text"
-                                                    value={row.reason}
-                                                    onChange={(e) =>
-                                                        handleItemChange(
-                                                            index,
-                                                            "reason",
-                                                            e.target.value
-                                                        )
-                                                    }
-                                                    placeholder="Sabab (ixtiyoriy)"
-                                                />
-                                            </td>
-                                            <td>
-                                                {items.length > 1 && (
-                                                    <button
-                                                        type="button"
-                                                        className="btn btn-small btn-danger"
-                                                        onClick={() => removeRow(index)}
-                                                        disabled={saving}
-                                                    >
-                                                        ×
-                                                    </button>
-                                                )}
-                                            </td>
-                                        </tr>
-                                    ))}
-                                </tbody>
-                            </table>
-                        </div>
-
-                        <div
-                            className="form-actions"
-                            style={{ marginTop: 12, display: "flex", gap: 8 }}
-                        >
-                            <button
-                                type="button"
-                                className="btn btn-secondary"
-                                onClick={addRow}
-                                disabled={saving}
-                            >
-                                + Qator qo‘shish
-                            </button>
-
-                            <button
-                                type="submit"
-                                className="btn btn-primary"
-                                disabled={saving}
-                            >
-                                {saving ? "Yuborilmoqda..." : "Vazvratni yuborish"}
-                            </button>
-                        </div>
-                    </form>
-                </div>
-            )}
-
-            {/* Ro'yxat – admin va branch uchun umumiy */}
-            <div className="card">
-                <div className="card-header">
-                    <div>
-                        <div className="card-title">
-                            {isAdmin
-                                ? "Filiallardan kelayotgan vazvratlar"
-                                : "Mening vazvratlarim"}
-                        </div>
-                        <div className="card-subtitle">
-                            So‘nggi yuborilgan va qabul qilingan qaytishlar.
-                        </div>
-                    </div>
-                </div>
-
-                {loadingList ? (
-                    <p>Yuklanmoqda...</p>
-                ) : (
-                    <div className="table-wrapper">
-                        <table className="table">
-                            <thead>
-                                <tr>
-                                    <th>#</th>
-                                    <th>Sana</th>
-                                    <th>Filial</th>
-                                    <th>Bandlar</th>
-                                    <th>Umumiy miqdor</th>
-                                    <th>Status</th>
-                                </tr>
-                            </thead>
-                            <tbody>
-                                {list.length === 0 ? (
-                                    <tr>
-                                        <td colSpan="6" style={{ textAlign: "center" }}>
-                                            Hali vazvrat yo‘q.
-                                        </td>
-                                    </tr>
-                                ) : (
-                                    list.map((row, index) => (
-                                        <tr
-                                            key={row.id}
-                                            onClick={() => openDetail(row)}
-                                            style={{
-                                                cursor: isAdmin ? "pointer" : "default",
-                                            }}
-                                        >
-                                            <td>{index + 1}</td>
-                                            <td>{row.return_date}</td>
-                                            <td>{row.branch_name || "—"}</td>
-                                            <td>{row.item_count}</td>
-                                            <td>{row.total_quantity}</td>
-                                            <td>
-                                                <span
-                                                    className={`badge ${statusBadgeClass(row.status)}`}
-                                                >
-                                                    {statusLabel(row.status)}
-                                                </span>
-                                            </td>
-                                        </tr>
-                                    ))
-                                )}
-                            </tbody>
-                        </table>
-                    </div>
-                )}
-            </div>
-
-            {/* Admin uchun detal panel / modal */}
-            {isAdmin && selectedReturn && (
-                <div className="drawer drawer-right">
-                    <div
-                        className="drawer-backdrop"
-                        onClick={() => setSelectedReturn(null)}
-                    />
-                    <div className="drawer-content">
-                        <div className="drawer-header">
-                            <h2 className="drawer-title">
-                                Vazvrat #{selectedReturn.header.id}
-                            </h2>
-                            <button
-                                className="btn btn-small btn-secondary"
-                                onClick={() => setSelectedReturn(null)}
-                            >
-                                Yopish
-                            </button>
-                        </div>
-
-                        {loadingDetail ? (
-                            <p>Yuklanmoqda...</p>
-                        ) : (
-                            <>
-                                <div className="drawer-section">
-                                    <div>
-                                        <b>Sana:</b> {selectedReturn.header.return_date}
-                                    </div>
-                                    <div>
-                                        <b>Filial:</b>{" "}
-                                        {selectedReturn.header.branch_name || "—"}
-                                    </div>
-                                    <div>
-                                        <b>Status:</b>{" "}
-                                        <span
-                                            className={`badge ${statusBadgeClass(
-                                                selectedReturn.header.status
-                                            )}`}
-                                        >
-                                            {statusLabel(selectedReturn.header.status)}
-                                        </span>
-                                    </div>
-                                    <div>
-                                        <b>Izoh:</b>{" "}
-                                        {selectedReturn.header.comment || "—"}
-                                    </div>
-                                </div>
-
-                                <div className="drawer-section">
-                                    <h3>Mahsulotlar</h3>
-                                    <div className="table-wrapper">
-                                        <table className="table">
-                                            <thead>
-                                                <tr>
-                                                    <th>#</th>
-                                                    <th>Mahsulot</th>
-                                                    <th>Miqdor</th>
-                                                    <th>O‘lchov</th>
-                                                    <th>Sabab</th>
-                                                    <th>Status</th>
-                                                    <th>Amallar</th>
-                                                </tr>
-                                            </thead>
-                                            <tbody>
-                                                {selectedReturn.items.map((it, idx) => (
-                                                    <tr key={it.id}>
-                                                        <td>{idx + 1}</td>
-                                                        <td>{it.product_name}</td>
-                                                        <td>{it.quantity}</td>
-                                                        <td>{it.unit || "—"}</td>
-                                                        <td>{it.reason || "—"}</td>
-                                                        <td>
-                                                            <span
-                                                                className={`badge ${statusBadgeClass(
-                                                                    it.status
-                                                                )}`}
-                                                            >
-                                                                {statusLabel(it.status)}
-                                                            </span>
-                                                        </td>
-                                                        <td>
-                                                            {selectedReturn.header.status === "PENDING" &&
-                                                                it.status === "PENDING" && (
-                                                                    <div
-                                                                        style={{
-                                                                            display: "flex",
-                                                                            gap: 6,
-                                                                            flexWrap: "wrap",
-                                                                        }}
-                                                                    >
-                                                                        <button
-                                                                            type="button"
-                                                                            className="btn btn-small btn-primary"
-                                                                            onClick={() => approveItem(it)}
-                                                                            disabled={itemActionLoading}
-                                                                        >
-                                                                            Qabul qilish
-                                                                        </button>
-                                                                        <button
-                                                                            type="button"
-                                                                            className="btn btn-small btn-secondary"
-                                                                            onClick={() => cancelItem(it)}
-                                                                            disabled={itemActionLoading}
-                                                                        >
-                                                                            Bekor qilish
-                                                                        </button>
-                                                                    </div>
-                                                                )}
-                                                        </td>
-                                                    </tr>
-                                                ))}
-                                            </tbody>
-                                        </table>
-                                    </div>
-                                </div>
-
-                                {selectedReturn.header.status === "PENDING" && (
-                                    <div
-                                        className="drawer-footer"
-                                        style={{
-                                            display: "flex",
-                                            justifyContent: "flex-end",
-                                            gap: 8,
-                                        }}
-                                    >
-                                        <button
-                                            className="btn btn-primary btn-small"
-                                            onClick={approveSelected}
-                                            disabled={approving || itemActionLoading}
-                                        >
-                                            {approving
-                                                ? "Qabul qilinmoqda..."
-                                                : "Barchasini qabul qilish"}
-                                        </button>
-                                    </div>
-                                )}
-                            </>
-                        )}
-                    </div>
-                </div>
-            )}
+            {/* Detal drawer */}
+            <ReturnDetailDrawer
+                isAdmin={isAdmin}
+                selectedReturn={selectedReturn}
+                loadingDetail={loadingDetail}
+                approving={approving}
+                itemActionLoading={itemActionLoading}
+                onClose={() => setSelectedReturn(null)}
+                onApproveAll={approveSelected}
+                onApproveItem={approveItem}
+                onCancelItem={cancelItem}
+            />
         </div>
     );
 }
